@@ -171,4 +171,6 @@ class NewsRepository:
             WHERE post_id = ?
         """
         results = self.db.execute_query(query, (post_id,))
-        return [row["keyword"] for row in results]
+        if results:
+            return [row["keyword"] for row in results]
+        return []

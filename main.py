@@ -83,6 +83,9 @@ def main():
                 console.print()
                 console.print(Panel("\n".join(selected_post), title="Selected Post", border_style="magenta"))
 
+                keywords=', '.join(result['keywords'])
+                console.print(f"Keywords: [magenta]{keywords}[/magenta]", justify="right")
+
             console.print()
             console.print(Panel(result["response"], title="Agent Response", border_style="cyan"))
             console.print()

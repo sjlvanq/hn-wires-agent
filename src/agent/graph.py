@@ -24,6 +24,7 @@ class AgentsState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     candidates: list[dict]
     selected_post_id: int | None
+    keywords: list[str]
     post_details: dict | None
     response: str | None
 
@@ -86,12 +87,14 @@ class NewsAgent:
 
         workflow.add_node("retrieve", self._retrieve_node)
         workflow.add_node("select", self._select_node)
+        workflow.add_node("keywords", self._keywords_node)
         workflow.add_node("fetch", self._fetch_node)
         workflow.add_node("respond", self._respond_node)
 
         workflow.set_entry_point("retrieve")
         workflow.add_edge("retrieve", "select")
-        workflow.add_edge("select", "fetch")
+        workflow.add_edge("select", "keywords")
+        workflow.add_edge("keywords", "fetch")
         workflow.add_edge("fetch", "respond")
         workflow.add_edge("respond", END)
 
@@ -113,6 +116,20 @@ class NewsAgent:
         return {
             **state,
             "selected_post_id": selected_post_id,
+        }
+
+    def _keywords_node(self, state: AgentsState) -> AgentsState:
+        """Extract keywords from the selected post."""
+        keywords = []
+
+        if state["selected_post_id"] is not None:
+            keywords = self.repository.get_post_keywords(state["selected_post_id"])
+
+        logger.debug(f"""keywords: {keywords}""")
+
+        return {
+            **state,
+            "keywords": keywords,
         }
 
     def _fetch_node(self, state: AgentsState) -> AgentsState:
@@ -169,6 +186,7 @@ class NewsAgent:
             "messages": messages,
             "candidates": [],
             "selected_post_id": None,
+            "keywords": [],
             "post_details": None,
             "response": None,
         }
@@ -181,6 +199,7 @@ class NewsAgent:
         return {
             "retrieved": result["candidates"],
             "selected_id": result["selected_post_id"],
+            "keywords": result.get("keywords", []),
             "selected_post": result["post_details"],
             "response": result["response"],
             "messages": result["messages"],
@@ -204,6 +223,7 @@ class NewsAgent:
             "messages": messages,
             "candidates": [],
             "selected_post_id": None,
+            "keywords": [],
             "post_details": None,
             "response": None,
         }
@@ -213,6 +233,8 @@ class NewsAgent:
         return {
             "retrieved": result["candidates"],
             "selected_id": result["selected_post_id"],
+            "keywords": result.get("keywords", []),
+            "selected_post_id": result["post_details"],
             "response": result["response"],
             "messages": result["messages"],
         }
