@@ -1,0 +1,9 @@
+python-dotenv
+rich
+langchain-core
+langgraph
+pydantic
+pydantic-settings
+sqlite-vec
+langchain-community
+langchain-ollama
