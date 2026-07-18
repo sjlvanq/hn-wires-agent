@@ -50,7 +50,7 @@ class SearchSimilarTool:
         query_embedding = self.embeddings.embed_query(query)
 
         # Perform vector search
-        results = self.repository.vector_search(query_embedding, top_k)
+        results = self.repository.wires_vector_search(query_embedding, top_k)
 
         if not results:
             return []

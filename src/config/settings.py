@@ -102,11 +102,11 @@ class Settings(BaseSettings):
     )
 
     # Vector Search Configuration
-    vector_search_top_k: int = Field(
+    wires_vector_search_top_k: int = Field(
         default=5,
         description="Number of top results to return from vector search"
     )
-    vector_search_threshold: float = Field(
+    wires_vector_search_threshold: float = Field(
         default=0.7,
         description="Similarity threshold for vector search"
     )

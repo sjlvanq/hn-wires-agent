@@ -37,7 +37,7 @@ def test_database():
         repository = NewsRepository()
         # Test vector search
         test_embedding = [0.0] * 384  # Dummy embedding for testing
-        vector_results = repository.vector_search(test_embedding, top_k=3)
+        vector_results = repository.wires_vector_search(test_embedding, top_k=3)
         print(f"✓ Vector search found {len(vector_results)} results")
 
         if vector_results:

@@ -94,13 +94,13 @@ class NewsRepository:
             post["wire"] = wire.get('summary')
         return post
 
-    def vector_search(self, embedding: list[float], top_k: Optional[int] = None) -> list[dict]:
+    def wires_vector_search(self, embedding: list[float], top_k: Optional[int] = None) -> list[dict]:
         """
         Perform vector similarity search using sqlite-vec.
 
         Args:
             embedding: Query embedding vector.
-            top_k: Number of results to return. Defaults to settings.vector_search_top_k.
+            top_k: Number of results to return. Defaults to settings.wires_vector_search_top_k.
 
         Returns:
             List of matching posts with similarity scores.
@@ -110,7 +110,7 @@ class NewsRepository:
             raise ValueError(f"Embedding vector must have length {settings.vector_search_vector_k}, got {len(embedding)}")
 
         if top_k is None:
-            top_k = settings.vector_search_top_k
+            top_k = settings.wires_vector_search_top_k
 
         # Convert embedding to string format for sqlite-vec
         embedding_str = ",".join(map(str, embedding))
@@ -132,14 +132,14 @@ class NewsRepository:
         try:
             results = self.db.execute_query(query, (top_k, "["+embedding_str+"]"))
         except Exception as e:
-            logger.error(f"Error executing vector search query: {e}")
+            logger.error(f"Error executing wires vector search query: {e}")
             return []
 
         if not results:
             return []
         
         # DEBUG
-        logger.debug(f"vector_search db.execute_query:")
+        logger.debug(f"wires_vector_search db.execute_query:")
         for row in results: logger.debug(dict(row))
 
         # Get full post data for each result

@@ -103,7 +103,7 @@ class NewsAgent:
     def _retrieve_node(self, state: AgentsState) -> AgentsState:
         """Retrieve candidate posts using semantic search."""
         query = state["messages"][-1].content
-        candidates = self.search_tool.search(query, top_k=settings.vector_search_top_k)
+        candidates = self.search_tool.search(query, top_k=settings.wires_vector_search_top_k)
         
         return {
             **state,
