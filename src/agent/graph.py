@@ -14,7 +14,7 @@ from models import OllamaLLM
 from .selector import SelectorAgent
 from .writer import WriterAgent
 from tools import (
-    SearchSimilarTool,
+    SearchSimilarByEmbeddingTool,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ class NewsAgent:
         self.repository = repository or NewsRepository()
         self.embeddings = embeddings or OllamaEmbeddings()
 
-        self.search_tool = SearchSimilarTool(self.repository, self.embeddings)
+        self.search_tool = SearchSimilarByEmbeddingTool(self.repository, self.embeddings)
 
         # Build the graph
         self.graph = self._build_graph()

@@ -1,5 +1,5 @@
 from .news_search import (
-    SearchSimilarTool,
+    SearchSimilarByEmbeddingTool,
 )
 
 __all__ = [

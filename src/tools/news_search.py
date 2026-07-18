@@ -7,14 +7,14 @@ from database import NewsRepository
 from embeddings import OllamaEmbeddings
 
 
-class SearchSimilarInput(BaseModel):
+class SearchSimilarByEmbeddingInput(BaseModel):
     """Input schema for similarity search tool."""
 
     query: str = Field(description="Query text to find similar news")
     top_k: int = Field(default=5, description="Number of similar results to return")
 
 
-class SearchSimilarTool:
+class SearchSimilarByEmbeddingTool:
     """Tool for searching similar news posts using vector embeddings."""
 
     name = "search_similar"
@@ -77,5 +77,5 @@ class SearchSimilarTool:
             func=self.search,
             name=self.name,
             description=self.description,
-            args_schema=SearchSimilarInput,
+            args_schema=SearchSimilarByEmbeddingInput,
         )

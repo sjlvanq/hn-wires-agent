@@ -14,7 +14,7 @@ from config.settings import settings
 from database import NewsRepository
 from embeddings import OllamaEmbeddings
 from models import OllamaLLM
-from tools import SearchSimilarTool
+from tools import SearchSimilarByEmbeddingTool
 
 # Load environment variables
 load_dotenv()
@@ -81,7 +81,7 @@ def test_tools():
         embeddings = OllamaEmbeddings()
 
         # Test similarity search
-        similar_tool = SearchSimilarTool(repository, embeddings)
+        similar_tool = SearchSimilarByEmbeddingTool(repository, embeddings)
         result = similar_tool.search("machine learning", top_k=2)
         print(f"✓ Similarity search tool working")
 
