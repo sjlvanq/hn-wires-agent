@@ -167,7 +167,7 @@ class NewsRepository:
         """
         query = """
             SELECT keyword
-            FROM post_keywords
+            FROM keywords
             WHERE post_id = ?
         """
         results = self.db.execute_query(query, (post_id,))
