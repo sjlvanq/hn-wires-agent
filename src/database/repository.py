@@ -94,6 +94,73 @@ class NewsRepository:
             post["wire"] = wire.get('summary')
         return post
 
+    def keywords_vector_search(self, keyword_id: int, top_k: Optional[int] = None) -> list[dict]:
+        """
+        Perform a vector similarity search over keywords, excluding ...
+
+        Args:
+            keyword_id: The ID of the keyword to use for the search.
+            top_k: Number of results to return. Defaults to settings.wires_vector_search_top_k.
+
+        Returns:
+
+        """
+        if top_k is None:
+            top_k = settings.wires_vector_search_top_k
+
+        query = f"""
+            SELECT
+                dvk.post_id,
+                dvk.keyword AS matched_keyword,
+                dvk.distance,
+                p.author,
+                p.time,
+                p.title,
+                p.url,
+                (
+                    SELECT GROUP_CONCAT(keyword, ', ')
+                    FROM keywords
+                    WHERE post_id = dvk.post_id
+                ) AS all_post_keywords
+            FROM (
+                SELECT
+                    v.rowid AS keyword_id,
+                    v.distance,
+                    k.post_id,
+                    k.keyword
+                FROM vec_keywords v
+                INNER JOIN keywords k ON v.rowid = k.id
+                WHERE v.k = ?
+                AND v.embedding MATCH (SELECT embedding FROM vec_keywords WHERE rowid = ?)
+            ) dvk
+            INNER JOIN posts p ON dvk.post_id = p.id
+            ORDER BY dvk.distance;
+        """
+
+        try:
+            results = self.db.execute_query(query, (top_k, keyword_id))
+        except Exception as e:
+            logger.error(f"Error executing wires vector search query: {e}")
+            return []
+
+        if not results:
+            return []
+
+        # DEBUG
+        logger.debug(f"keywords_vector_search db.execute_query:")
+        for row in results: logger.debug(dict(row))
+
+        posts = []
+        for row in results:
+            distance = row["distance"]
+            similarity = math.exp(-distance)
+            post = dict(row)
+            post["similarity"] = similarity
+            posts.append(post)
+
+        return posts
+
+
     def wires_vector_search(self, embedding: list[float], top_k: Optional[int] = None) -> list[dict]:
         """
         Perform vector similarity search using sqlite-vec.
@@ -105,7 +172,6 @@ class NewsRepository:
         Returns:
             List of matching posts with similarity scores.
         """
-
         if len(embedding) != settings.vector_search_vector_k:
             raise ValueError(f"Embedding vector must have length {settings.vector_search_vector_k}, got {len(embedding)}")
 

@@ -1,7 +1,9 @@
 from .news_search import (
     SearchSimilarByEmbeddingTool,
+    SearchSimilarByKeywordTool,
 )
 
 __all__ = [
-    "SearchSimilarTool",
+    "SearchSimilarByEmbeddingTool",
+    "SearchSimilarByKeywordTool",
 ]
