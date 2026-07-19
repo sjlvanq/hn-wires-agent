@@ -83,7 +83,10 @@ def main():
                 console.print()
                 console.print(Panel("\n".join(selected_post), title="Selected Post", border_style="magenta"))
 
-                keywords=', '.join(result['keywords'])
+                keywords = ', '.join(
+                    f"{keyword['text']} (ID: {keyword['id']})"
+                    for keyword in result['keywords']
+                )
                 console.print(f"Keywords: [magenta]{keywords}[/magenta]", justify="right")
 
             console.print()

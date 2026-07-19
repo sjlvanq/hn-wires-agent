@@ -24,7 +24,7 @@ class AgentsState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     candidates: list[dict]
     selected_post_id: int | None
-    keywords: list[str]
+    keywords: list[dict]
     post_details: dict | None
     response: str | None
 

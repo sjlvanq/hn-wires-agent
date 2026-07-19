@@ -221,7 +221,7 @@ class NewsRepository:
 
         return posts
 
-    def get_post_keywords(self, post_id: int) -> list[str]:
+    def get_post_keywords(self, post_id: int) -> list[dict]:
         """
         Retrieve keywords for a post.
 
@@ -229,14 +229,14 @@ class NewsRepository:
             post_id: The post ID.
 
         Returns:
-            List of keywords.
+            List of keyword dictionaries with keys "id" and "text".
         """
         query = """
-            SELECT keyword
+            SELECT id, keyword
             FROM keywords
             WHERE post_id = ?
         """
         results = self.db.execute_query(query, (post_id,))
         if results:
-            return [row["keyword"] for row in results]
+            return [{"id": row["id"], "text": row["keyword"]} for row in results]
         return []
