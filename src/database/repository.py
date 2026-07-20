@@ -238,5 +238,5 @@ class NewsRepository:
         """
         results = self.db.execute_query(query, (post_id,))
         if results:
-            return [{"id": row["id"], "text": row["keyword"]} for row in results]
+            return [{"id": row["id"], "keyword": row["keyword"]} for row in results]
         return []
