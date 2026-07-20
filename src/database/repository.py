@@ -99,12 +99,13 @@ class NewsRepository:
         Returns:
             List of result dictionaries with added 'similarity' key.
         """
-        for row in results:
+        normalized = [dict(r) for r in results]
+        for row in normalized:
             distance = row.get("distance", 0)
             # Convert raw distance to a similarity score with exponential decay.
             similarity = math.exp(-distance)
             row["similarity"] = similarity
-        return results
+        return normalized
 
 
     def get_post_with_wire(self, post_id: int) -> Optional[dict]:
