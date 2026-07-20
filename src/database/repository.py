@@ -7,6 +7,10 @@ from database.connection import DatabaseConnection
 import logging
 logger = logging.getLogger(__name__)
 
+class NewsRepositoryException(Exception):
+    """Custom exception for NewsRepository errors."""
+    pass
+
 class NewsRepository:
     """Repository for accessing news data from SQLite database."""
 
@@ -34,7 +38,12 @@ class NewsRepository:
             FROM posts
             WHERE id = ?
         """
-        results = self.db.execute_query(query, (post_id,))
+        try:
+            results = self.db.execute_query(query, (post_id,))
+        except Exception as e:
+            logger.error(f"Error occurred while fetching post by ID {post_id}: {e}")
+            raise NewsRepositoryException("Error occurred while fetching post by ID") from e
+
         if results:
             row = results[0]
             return {
@@ -64,7 +73,12 @@ class NewsRepository:
             FROM wires
             WHERE post_id = ?
         """
-        results = self.db.execute_query(query, (post_id,))
+        try:
+            results = self.db.execute_query(query, (post_id,))
+        except Exception as e:
+            logger.error(f"Error occurred while fetching wire by post ID {post_id}: {e}")
+            raise NewsRepositoryException("Error occurred while fetching wire by post ID") from e
+
         if results:
             row = results[0]
             return {
@@ -85,13 +99,24 @@ class NewsRepository:
         Returns:
             Dictionary with post and wire data or None if not found.
         """
-        post = self._get_post_by_id(post_id)
+        try:
+            post = self._get_post_by_id(post_id)
+        except Exception as e:
+            logger.error(f"Error occurred while fetching post by ID {post_id}: {e}")
+            raise NewsRepositoryException("Error occurred while fetching post by ID") from e
+
         if not post:
             return None
 
-        wire = self._get_wire_by_post_id(post_id)
+        try:
+            wire = self._get_wire_by_post_id(post_id)
+        except Exception as e:
+            logger.error(f"Error occurred while fetching wire by post ID {post_id}: {e}")
+            raise NewsRepositoryException("Error occurred while fetching wire by post ID") from e
+        
         if wire:
             post["wire"] = wire.get('summary')
+        
         return post
 
     def keywords_vector_search(self, keyword_id: int, top_k: Optional[int] = None) -> list[dict]:
@@ -141,7 +166,7 @@ class NewsRepository:
             results = self.db.execute_query(query, (top_k, keyword_id))
         except Exception as e:
             logger.error(f"Error executing wires vector search query: {e}")
-            return []
+            raise NewsRepositoryException("Error occurred while executing wires vector search") from e
 
         if not results:
             return []
@@ -199,7 +224,7 @@ class NewsRepository:
             results = self.db.execute_query(query, (top_k, "["+embedding_str+"]"))
         except Exception as e:
             logger.error(f"Error executing wires vector search query: {e}")
-            return []
+            raise NewsRepositoryException("Error occurred while executing wires vector search") from e
 
         if not results:
             return []
@@ -236,7 +261,11 @@ class NewsRepository:
             FROM keywords
             WHERE post_id = ?
         """
-        results = self.db.execute_query(query, (post_id,))
+        try:
+            results = self.db.execute_query(query, (post_id,))
+        except Exception as e:
+            logger.error(f"Error occurred while fetching keywords for post ID {post_id}: {e}")
+            raise NewsRepositoryException("Error occurred while fetching keywords for post ID") from e
         if results:
             return [{"id": row["id"], "keyword": row["keyword"]} for row in results]
         return []
