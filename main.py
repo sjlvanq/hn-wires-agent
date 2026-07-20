@@ -90,8 +90,9 @@ def main():
                 console.print(f"Keywords: [magenta]{keywords}[/magenta]", justify="right")
 
             console.print()
-            console.print(Panel(result["response"], title="Agent Response", border_style="cyan"))
-            console.print()
+            if result["response"]:
+                console.print(Panel(result["response"], title="Agent Response", border_style="cyan"))
+                console.print()
 
         except KeyboardInterrupt:
             console.print("\nInterrupted by user.", style="yellow")

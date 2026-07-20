@@ -31,9 +31,11 @@ class SelectorAgent:
     def _build_prompt(self, user_query: str, candidates: list[dict[str, Any]]) -> str:
         candidate_lines = []
         for candidate in candidates:
+            summary = candidate.get('summary') or candidate.get('title') or ''
+            summary_text = summary.split('.')[0] if isinstance(summary, str) else ''
             candidate_lines.append(
                 f"- id: {candidate.get('id')}\n"
-                f"  summary: {candidate.get('summary').split('.')[0]}\n"
+                f"  summary: {summary_text}\n"
             )
 
         candidate_text = "\n".join(candidate_lines)

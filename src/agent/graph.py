@@ -28,6 +28,8 @@ class AgentsState(TypedDict):
     keywords: list[dict]
     post_details: dict | None
     response: str | None
+    skip_agent_response: bool
+    last_keywords_ids: list[int] = []
 
 
 class NewsAgent:
@@ -107,10 +109,19 @@ class NewsAgent:
 
     def _retrieve_node(self, state: AgentsState) -> AgentsState:
         """Retrieve candidate posts using semantic search."""
-        query = state["messages"][-1].content
-        candidates = self.search_tool_structured.run(
-            {"query": query, "top_k": settings.wires_vector_search_top_k}
-        )
+        messages = state.get("messages") or []
+        if not messages:
+            logger.error("No messages in state for retrieve node; aborting retrieval.")
+            return {**state, "skip_agent_response": True}
+
+        query = messages[-1].content
+        try:
+            candidates = self.search_tool_structured.run(
+                {"query": query, "top_k": settings.wires_vector_search_top_k}
+            )
+        except Exception:
+            logger.exception("Search tool failed in retrieve node")
+            candidates = []
         
         return {
             **state,
@@ -119,7 +130,18 @@ class NewsAgent:
 
     def _select_node(self, state: AgentsState) -> AgentsState:
         """Select the single most relevant post ID from the retrieved candidates."""
-        selected_post_id = self.selector.select(state["messages"][-1].content, state["candidates"])
+        messages = state.get("messages") or []
+        if not messages:
+            logger.error("No messages in state for select node; cannot select post.")
+            return {**state, "selected_post_id": None, "skip_agent_response": True}
+        try:
+            selected_post_id = self.selector.select(messages[-1].content, state.get("candidates", []))
+        except Exception as e:
+            return self._handle_internal_error(
+                {**state, "selected_post_id": None},
+                e,
+                "An error occurred while selecting the post. Please try again later.",
+            )
         return {
             **state,
             "selected_post_id": selected_post_id,
@@ -155,8 +177,19 @@ class NewsAgent:
 
     def _respond_node(self, state: AgentsState) -> AgentsState:
         """Build the final response based on the selected post."""
-        
-        user_query = state["messages"][-1].content
+        if state.get("skip_agent_response"):
+            return {
+                **state,
+                "response": "",
+                "messages": state["messages"],
+            }
+
+        messages = state.get("messages") or []
+        if not messages:
+            logger.error("No messages in state for respond node; nothing to respond to.")
+            return {**state, "response": "", "messages": messages, "skip_agent_response": True}
+
+        user_query = messages[-1].content
 
         if not state["post_details"]:
             response_text = (
@@ -165,7 +198,18 @@ class NewsAgent:
             )
         else:
             post = state["post_details"]
-            response_text = self.writer.write(user_query, post)
+            try:
+                response_text = self.writer.write(user_query, post)
+            except Exception as e:
+                return self._handle_internal_error(
+                    state,
+                    e,
+                    "An error occurred while generating the response. Please try again later.",
+                )
+
+        keywords = state.get("keywords", [])
+        if keywords:
+            self.last_keyword_ids = [k["id"] for k in keywords]
 
         messages = [*state["messages"], SystemMessage(content=response_text)]
         return {
@@ -174,6 +218,16 @@ class NewsAgent:
             "response": response_text,
             "messages": messages,
         }
+
+    def _handle_internal_error(self, state: AgentsState, exc: Exception, user_facing_msg: str) -> AgentsState:
+        """Uniform internal error handler: log, append a system message and mark skip flag.
+
+        Returns an updated AgentsState suitable to be returned by graph nodes.
+        """
+        logger.exception("Internal error in NewsAgent: %s", exc)
+        messages = list(state.get("messages") or [])
+        messages.append(SystemMessage(content=user_facing_msg))
+        return {**state, "messages": messages, "response": "", "skip_agent_response": True}
 
     def invoke(self, message: str, chat_history: list | None = None) -> dict:
         """
