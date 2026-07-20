@@ -42,13 +42,13 @@ class SelectorAgent:
 
         return (
             "You are a post selection assistant.\n"
-            "A user asked: \"{user_query}\"\n"
+            f"A user asked: \"{user_query}\"\n"
             "Below are candidate Hacker News posts retrieved by semantic search:\n\n"
             f"{candidate_text}\n"
             "Choose the single post that is the most relevant to the user request in any sense. "
             "Return ONLY the numeric post ID as a bare number on the first line of the answer. "
             "Do not include any additional text or explanation."
-        ).format(user_query=user_query)
+        )
 
     def _parse_post_id(self, text: str) -> int | None:
         """Extract the first integer post ID from the model response."""
