@@ -11,7 +11,7 @@ class SearchSimilarByEmbeddingInput(BaseModel):
     """Input schema for similarity search tool."""
 
     query: str = Field(description="Query text to find similar news")
-    top_k: int = Field(default=5, description="Number of similar results to return")
+    top_k: int = Field(description="Number of similar results to return")
 
 
 class SearchSimilarByEmbeddingTool:
