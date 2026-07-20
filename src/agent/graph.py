@@ -234,7 +234,7 @@ class NewsAgent:
             "retrieved": result["candidates"],
             "selected_id": result["selected_post_id"],
             "keywords": result.get("keywords", []),
-            "selected_post_id": result["post_details"],
+            "selected_post": result["post_details"],
             "response": result["response"],
             "messages": result["messages"],
         }
