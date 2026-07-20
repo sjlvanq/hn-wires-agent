@@ -1,4 +1,5 @@
 from typing import Optional
+import warnings
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
@@ -11,7 +12,7 @@ class SearchSimilarByEmbeddingInput(BaseModel):
     """Input schema for similarity search tool."""
 
     query: str = Field(description="Query text to find similar news")
-    top_k: int = Field(description="Number of similar results to return")
+    top_k: int = Field(default=3, description="Number of similar results to return")
 
 
 class SearchSimilarByEmbeddingTool:
@@ -46,6 +47,13 @@ class SearchSimilarByEmbeddingTool:
         Returns:
             list[dict] with search results.
         """
+        # Deprecation notice: prefer calling the StructuredTool via `as_tool().run(...)`
+        warnings.warn(
+            "SearchSimilarByEmbeddingTool.search() is deprecated; use as_tool().run({'query':..., 'top_k':...}) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         # Generate embedding for query
         query_embedding = self.embeddings.embed_query(query)
 
@@ -117,6 +125,13 @@ class SearchSimilarByKeywordTool:
         Returns:
             list[dict] with search results.
         """
+        # Deprecation notice: prefer calling the StructuredTool via `as_tool().run(...)`
+        warnings.warn(
+            "SearchSimilarByKeywordTool.search() is deprecated; use as_tool().run({'keyword_id':..., 'top_k':...}) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         # Perform vector search using keyword_id
         results = self.repository.keywords_vector_search(keyword_id, top_k)
 

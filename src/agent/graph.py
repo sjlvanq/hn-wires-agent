@@ -15,6 +15,7 @@ from .selector import SelectorAgent
 from .writer import WriterAgent
 from tools import (
     SearchSimilarByEmbeddingTool,
+    SearchSimilarByKeywordTool,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,10 @@ class NewsAgent:
         self.embeddings = embeddings or OllamaEmbeddings()
 
         self.search_tool = SearchSimilarByEmbeddingTool(self.repository, self.embeddings)
+        self.search_tool_structured = self.search_tool.as_tool()
+        self.keyword_search_tool = SearchSimilarByKeywordTool(self.repository)
+        self.keyword_search_tool_structured = self.keyword_search_tool.as_tool()
+        self.last_keyword_ids: list[int] = []
 
         # Build the graph
         self.graph = self._build_graph()
@@ -103,7 +108,9 @@ class NewsAgent:
     def _retrieve_node(self, state: AgentsState) -> AgentsState:
         """Retrieve candidate posts using semantic search."""
         query = state["messages"][-1].content
-        candidates = self.search_tool.search(query, top_k=settings.wires_vector_search_top_k)
+        candidates = self.search_tool_structured.run(
+            {"query": query, "top_k": settings.wires_vector_search_top_k}
+        )
         
         return {
             **state,
