@@ -89,6 +89,24 @@ class NewsRepository:
             }
         return None
 
+    def _add_similarity_scores(self, results: list[dict]) -> list[dict]:
+        """
+        Add similarity scores to the results based on distance.
+
+        Args:
+            results: List of result dictionaries containing 'distance'.
+
+        Returns:
+            List of result dictionaries with added 'similarity' key.
+        """
+        for row in results:
+            distance = row.get("distance", 0)
+            # Convert raw distance to a similarity score with exponential decay.
+            similarity = math.exp(-distance)
+            row["similarity"] = similarity
+        return results
+
+
     def get_post_with_wire(self, post_id: int) -> Optional[dict]:
         """
         Retrieve post with its associated wire data.
@@ -175,16 +193,8 @@ class NewsRepository:
         logger.debug(f"keywords_vector_search db.execute_query:")
         for row in results: logger.debug(dict(row))
 
-        posts = []
-        for row in results:
-            distance = row["distance"]
-            similarity = math.exp(-distance)
-            post = dict(row)
-            post["similarity"] = similarity
-            posts.append(post)
-
-        return posts
-
+        keywords = self._add_similarity_scores(results)
+        return keywords
 
     def wires_vector_search(self, embedding: list[float], top_k: Optional[int] = None) -> list[dict]:
         """
@@ -233,16 +243,7 @@ class NewsRepository:
         logger.debug(f"wires_vector_search db.execute_query:")
         for row in results: logger.debug(dict(row))
 
-        # Get full post data for each result
-        posts = []
-        for row in results:
-            distance = row["distance"]
-            # Use exponential decay for better similarity score scaling
-            # Distance 0 -> similarity 1.0, Distance 1 -> similarity 0.37, Distance 2 -> similarity 0.14
-            similarity = math.exp(-distance)
-            post = dict(row)
-            post["similarity"] = similarity
-            posts.append(post)
+        posts = self._add_similarity_scores(results)
 
         return posts
 
