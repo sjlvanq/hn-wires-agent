@@ -62,17 +62,18 @@ def main():
             result = agent.invoke(user_input)
 
             # Display retrieved candidates
-            console.print()
-            if result["retrieved"]:
-                candidate_lines = [
-                    f"{candidate['id']}: {candidate['title']} (score={candidate.get('similarity', 'N/A')})"
-                    for candidate in result["retrieved"]
-                ]
-                console.print(Panel("\n".join(candidate_lines), title="Retrieved candidates", border_style="yellow"))
-                if result['selected_id']:
-                    console.print(f"Selected post ID: {result['selected_id']}", style="bold green")
-            else:
-                console.print(Panel("No candidates found.", title="Retrieved candidates", border_style="yellow"))
+            if not result.get("skip_retrieved", False):
+                console.print()
+                if result["retrieved"]:
+                    candidate_lines = [
+                        f"{candidate['id']}: {candidate['title']} (score={candidate.get('similarity', 'N/A')})"
+                        for candidate in result["retrieved"]
+                    ]
+                    console.print(Panel("\n".join(candidate_lines), title="Retrieved candidates", border_style="yellow"))
+                    if result['selected_id']:
+                        console.print(f"Selected post ID: {result['selected_id']}", style="bold green")
+                else:
+                    console.print(Panel("No candidates found.", title="Retrieved candidates", border_style="yellow"))
 
 
             if result["selected_post"]:

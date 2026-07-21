@@ -422,6 +422,7 @@ class NewsAgent:
                 "selected_post": None,
                 "response": "No message context provided",
                 "messages": messages,
+                "skip_retrieved": True,
             }
 
         try:
@@ -436,6 +437,7 @@ class NewsAgent:
                 "selected_post": None,
                 "response": "Invalid command",
                 "messages": messages,
+                "skip_retrieved": True,
             }
 
         try:
