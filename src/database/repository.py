@@ -15,23 +15,30 @@ class NewsRepository:
     """Repository for accessing news data from SQLite database."""
 
     def __init__(self, db_connection: Optional[DatabaseConnection] = None):
-        """
-        Initialize news repository.
+        """Create a new :class:`NewsRepository`.
 
-        Args:
-            db_connection: Database connection instance. If None, creates new instance.
+        Parameters
+        ----------
+        db_connection:
+            Existing :class:`DatabaseConnection` instance.  If omitted a new
+            connection will be established internally.  This allows callers to
+            share a single database connection across several repositories.
         """
         self.db = db_connection or DatabaseConnection()
 
     def _get_post_by_id(self, post_id: int) -> Optional[dict]:
-        """
-        Retrieve a post by its ID (internal method).
+        """Return a post by its numeric ``id``.
 
-        Args:
-            post_id: The post ID.
+        Parameters
+        ----------
+        post_id: int
+            The id of the post to look up.
 
-        Returns:
-            Dictionary with post data or None if not found.
+        Returns
+        -------
+        Optional[dict]
+            A dictionary containing the post fields – ``id``, ``author`` and
+            ``title`` – or ``None`` if the id does not exist.
         """
         query = """
             SELECT id, author, descendants, score, time, title, text, url
@@ -59,14 +66,18 @@ class NewsRepository:
         return None
 
     def _get_wire_by_post_id(self, post_id: int) -> Optional[dict]:
-        """
-        Retrieve wire data for a post (internal method).
+        """Return the ``wires`` record attached to a post.
 
-        Args:
-            post_id: The post ID.
+        Parameters
+        ----------
+        post_id: int
+            Identifier of the post whose wire is requested.
 
-        Returns:
-            Dictionary with wire data or None if not found.
+        Returns
+        -------
+        Optional[dict]
+            ``None`` if the post has no associated wire; otherwise a mapping
+            containing ``id``, ``post_id``, ``topic`` and ``summary``.
         """
         query = """
             SELECT id, post_id, topic, summary
@@ -90,14 +101,23 @@ class NewsRepository:
         return None
 
     def _add_similarity_scores(self, results: list[dict]) -> list[dict]:
-        """
-        Add similarity scores to the results based on distance.
+        """Add an exponential *similarity* field to result rows.
 
-        Args:
-            results: List of result dictionaries containing 'distance'.
+        The ``sqlite-vec`` module returns a ``distance`` value that decreases as
+        vectors become more similar.  To make the value more intuitive we
+        convert it with an exponential decay function: ``similarity =
+        exp(-distance)``.
 
-        Returns:
-            List of result dictionaries with added 'similarity' key.
+        Parameters
+        ----------
+        results: list[dict]
+            Query results that each contain a ``distance`` key.
+
+        Returns
+        -------
+        list[dict]
+            The same list of dictionaries, each augmented with a ``similarity``
+            key.
         """
         normalized = [dict(r) for r in results]
         for row in normalized:
@@ -109,14 +129,19 @@ class NewsRepository:
 
 
     def get_post_with_wire(self, post_id: int) -> Optional[dict]:
-        """
-        Retrieve post with its associated wire data.
+        """Return a post enriched with wire information when available.
 
-        Args:
-            post_id: The post ID.
+        Parameters
+        ----------
+        post_id: int
+            Identifier of the post.
 
-        Returns:
-            Dictionary with post and wire data or None if not found.
+        Returns
+        -------
+        Optional[dict]
+            ``None`` if the post does not exist.  Otherwise a dictionary with
+            all post columns and an optional ``wire`` key containing the
+            wire summary.
         """
         try:
             post = self._get_post_by_id(post_id)
@@ -139,15 +164,22 @@ class NewsRepository:
         return post
 
     def keywords_vector_search(self, keyword_id: int, top_k: Optional[int] = None) -> list[dict]:
-        """
-        Perform a vector similarity search over keywords, excluding ...
+        """Search posts that are close to the vector of ``keyword_id``.
 
-        Args:
-            keyword_id: The ID of the keyword to use for the search.
-            top_k: Number of results to return. Defaults to settings.wires_vector_search_top_k.
+        Parameters
+        ----------
+        keyword_id: int
+            Identifier of a keyword row whose embedding is used as a query.
+        top_k: int | None
+            Number of top‑ranked results to return.  ``None`` defaults to
+            :pyattr:`settings.wires_vector_search_top_k`.
 
-        Returns:
-
+        Returns
+        -------
+        list[dict]
+            A list of matching post records augmented with a ``similarity``
+            field.  Each item contains the post data, the matched keyword and
+            the full set of keywords for that post.
         """
         if top_k is None:
             top_k = settings.wires_vector_search_top_k
@@ -198,15 +230,23 @@ class NewsRepository:
         return keywords
 
     def wires_vector_search(self, embedding: list[float], top_k: Optional[int] = None) -> list[dict]:
-        """
-        Perform vector similarity search using sqlite-vec.
+        """Search *wires* on a user supplied embedding.
 
-        Args:
-            embedding: Query embedding vector.
-            top_k: Number of results to return. Defaults to settings.wires_vector_search_top_k.
+        Parameters
+        ----------
+        embedding: list[float]
+            The query vector to compare against the ``vector`` column in
+            ``vec_wires``.
+        top_k: int | None
+            Maximum number of results to return; ``None`` falls back to
+            :pyattr:`settings.wires_vector_search_top_k`.
 
-        Returns:
-            List of matching posts with similarity scores.
+        Returns
+        -------
+        list[dict]
+            Posts that match the embedding ranked by distance, each augmented
+            with a ``similarity`` key derived from the exponential decay of
+            distance.
         """
         if len(embedding) != settings.vector_search_vector_k:
             raise ValueError(f"Embedding vector must have length {settings.vector_search_vector_k}, got {len(embedding)}")
@@ -249,14 +289,19 @@ class NewsRepository:
         return posts
 
     def get_post_keywords(self, post_id: int) -> list[dict]:
-        """
-        Retrieve keywords for a post.
+        """Return the list of keywords attached to a post.
 
-        Args:
-            post_id: The post ID.
+        Parameters
+        ----------
+        post_id: int
+            Identifier of the post whose keywords we want.
 
-        Returns:
-            List of keyword dictionaries with keys "id" and "text".
+        Returns
+        -------
+        list[dict]
+            Each dictionary contains the primary key ``id`` and the keyword
+            string under the key ``keyword``.  The list may be empty if the
+            post has no keywords.
         """
         query = """
             SELECT id, keyword
