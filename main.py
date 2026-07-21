@@ -39,6 +39,7 @@ def main():
     try:
         agent = NewsAgent()
         console.print("Agent ready!", style="green")
+        console.print("[dim]Type your query or 'quit' to exit.[/dim]", style="green")
     except Exception as e:
         console.print(f"Error initializing agent: {e}", style="red")
         console.print("Make sure Ollama is running and the database exists.", style="yellow")
@@ -49,7 +50,7 @@ def main():
         try:
             user_input = Prompt.ask("[bold blue]You[/bold blue]", default="")
 
-            if user_input.lower() in ["quit", "exit", "q"]:
+            if user_input.lower() in ["quit", "exit", "q", "/quit", "/exit"]:
                 print_goodbye()
                 break
 
@@ -68,7 +69,8 @@ def main():
                     for candidate in result["retrieved"]
                 ]
                 console.print(Panel("\n".join(candidate_lines), title="Retrieved candidates", border_style="yellow"))
-                console.print(f"Selected post ID: {result['selected_id']}", style="bold green")
+                if result['selected_id']:
+                    console.print(f"Selected post ID: {result['selected_id']}", style="bold green")
             else:
                 console.print(Panel("No candidates found.", title="Retrieved candidates", border_style="yellow"))
 
@@ -83,11 +85,13 @@ def main():
                 console.print()
                 console.print(Panel("\n".join(selected_post), title="Selected Post", border_style="magenta"))
 
-                keywords = ', '.join(
-                    f"{keyword['keyword']} (ID: {keyword['id']})"
-                    for keyword in result['keywords']
-                )
-                console.print(f"Keywords: [magenta]{keywords}[/magenta]", justify="right")
+                if result['keywords']:
+                    keywords = ', '.join(
+                        f"{keyword['keyword']} (ID: {keyword['id']})"
+                        for keyword in result['keywords']
+                    )
+                    console.print(f"Keywords: [magenta]{keywords}[/magenta]", justify="right")
+                    console.print(f"[dim][magenta]Use [u]/keyword <keyword_id> <optional-selection-criteria>[/u] for relational lookup[/magenta][dim]", justify="right")
 
             console.print()
             if result["response"]:
