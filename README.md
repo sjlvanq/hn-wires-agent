@@ -2,15 +2,9 @@
 
 > **🚧 Work in Progress** - This project is under active development. The ultimate goal is to build a **news curation assistant for content creation**.
 
-A LangGraph-based conversational agent that enriches user conversations by associating inputs with relevant Hacker News articles using semantic search and vector embeddings.
+A LangGraph-based conversational agent that enriches user conversations by associating inputs with relevant scraped Hacker News articles using semantic search.
 
-This project was built to run on **small local models** - no need for expensive GPUs or cloud APIs. By breaking tasks into smaller pieces (like one agent just picking the right post, another just writing the response), each model only needs to handle simple jobs with limited context. The whole thing runs on your own machine, keeping your data private while still being smart enough to be useful.
-
-The system follows a retrieval-selection-response pipeline:
-1. **Retrieve**: Semantic search finds candidate posts
-2. **Select**: LLM selects the most relevant post
-3. **Fetch**: Retrieves full post details with wire analysis
-4. **Respond**: Generates contextual response linking user input to selected post
+Designed for small local models via specialized agents, this project can run entirely on your machine without GPUs or cloud APIs. It relies on the **Ollama** local LLM server for both text generation and embeddings.
 
 ## Screenshot
 
@@ -35,6 +29,19 @@ cp .env.example .env
 # Edit .env to configure Ollama models and database path
 ```
 
+### 🛠️ Ollama Notice
+
+ Before running the agent you should:
+
+1. Install Ollama following the instructions at https://ollama.com.
+2. Start the server locally (the default port `11434` is used by the code).
+3. Download the required models by running, for example:
+	```bash
+	ollama pull all-minilm:33m   # Embedding model
+	ollama pull alibayram/hunyuan:0.5b   # Selector/Writer models
+	```
+
+
 ## Usage
 
 ```bash
@@ -47,11 +54,11 @@ The agent will start an interactive CLI where you can ask questions and receive 
 ## Configuration
 
 Key environment variables in `.env`:
-- `OLLAMA_BASE_URL`: Ollama API endpoint
-- `OLLAMA_EMBEDDING_MODEL`: Model for embeddings (default: `all-minilm:33m`)
-- `SELECTOR_LLM_MODEL`: Model for post selection
-- `WRITER_LLM_MODEL`: Model for response generation
-- `DATABASE_PATH`: Path to SQLite database
+* `OLLAMA_BASE_URL`: Ollama API endpoint (default: `http://localhost:11434`)
+* `OLLAMA_EMBEDDING_MODEL`: Model for embeddings (default: `all-minilm:33m`)
+* `SELECTOR_LLM_MODEL`: Model for post selection
+* `WRITER_LLM_MODEL`: Model for response generation
+* `DATABASE_PATH`: Path to SQLite database
 
 ## License
 
