@@ -240,23 +240,32 @@ class NewsAgent:
         Returns:
             Dictionary with response and updated message history.
         """
-        messages = chat_history or []
+        messages = list(chat_history) if chat_history else []
         messages.append(HumanMessage(content=message))
 
-        initial_state = {
+        if message.startswith("/keyword"):
+            return self._invoke_explore_keyword_flow(messages)
+
+        return self._invoke_default_flow(messages)
+
+    def _invoke_default_flow(self, messages):
+        state = self._build_initial_state(messages)
+        result = self.graph.invoke(state)
+        return self._format_result(result)
+
+    def _build_initial_state(self, messages) -> AgentsState:
+        return {
             "messages": messages,
             "candidates": [],
             "selected_post_id": None,
             "keywords": [],
             "post_details": None,
             "response": None,
+            "skip_agent_response": False,
+            "last_keywords_ids": [],
         }
 
-        result = self.graph.invoke(initial_state)
-
-        # DEBUG
-        logger.debug(result)
-
+    def _format_result(self, result) -> dict:
         return {
             "retrieved": result["candidates"],
             "selected_id": result["selected_post_id"],
@@ -266,38 +275,124 @@ class NewsAgent:
             "messages": result["messages"],
         }
 
-    async def ainvoke(self, message: str, chat_history: list | None = None) -> dict:
+    def _invoke_explore_keyword_flow(self, messages: list[BaseMessage]):
+        messages = messages or []
+        if not messages:
+            logger.error("No messages provided to _invoke_explore_keyword_flow")
+            return {
+                "retrieved": [],
+                "selected_id": None,
+                "keywords": [],
+                "selected_post": None,
+                "response": "No message context provided",
+                "messages": messages,
+            }
+
+        try:
+            keyword_id, selection_criteria = self._parse_explore_keyword_command(messages[-1].content)
+        except Exception as e:
+            logger.exception("Failed to parse /keyword command")
+            messages = [*messages, SystemMessage(content="Invalid usage of /keyword. Usage: /keyword <id> [criteria]")]
+            return {
+                "retrieved": [],
+                "selected_id": None,
+                "keywords": [],
+                "selected_post": None,
+                "response": "Invalid command",
+                "messages": messages,
+            }
+
+        try:
+            candidates = self.keyword_search_tool_structured.run({"keyword_id": keyword_id})
+        except Exception as e:
+            logger.exception("Keyword search failed in explore flow")
+            err_state = self._build_explore_state(messages, [], None)
+            err_state = self._handle_internal_error(err_state, e, "Error searching by keyword; try again later.")
+            return self._format_result(err_state)
+
+        if not candidates:
+            state = self._build_explore_state(messages, [], None)
+            state = self._handle_internal_error(
+                state, 
+                ValueError(f"No candidates found for keyword id {keyword_id}."), 
+                f"No posts related to keyword {keyword_id} were found."
+            )
+            return self._format_result(state)
+
+        if selection_criteria is None:
+            return self._format_explore_candidates(candidates, messages)
+
+        try:
+            selected_post_id = self.selector.select(selection_criteria, candidates)
+        except Exception as e:
+            err_state = self._build_explore_state(messages, candidates, None)
+            err_state = self._handle_internal_error(err_state, e, "An error occurred while selecting the post. Try again later.")
+            return self._format_result(err_state)
+
+        state = self._build_explore_state(messages, candidates, selected_post_id)
+        state = self._keywords_node(state)
+        state = self._fetch_node(state)
+        
+        self._preserve_keyword_ids(state)
+        return self._format_result(state)
+
+    def _parse_explore_keyword_command(self, message: str) -> tuple[int | None, str | None]:
+        try:
+            keyword_text = message[len("/keyword"):].strip()
+            logger.debug(f"Parsing /keyword command: '{keyword_text}'")
+            keyword_id = int(keyword_text.split()[0])
+            logger.debug(f"Extracted keyword_id: {keyword_id}")
+            selection_criteria = " ".join(keyword_text.split()[1:]) or None
+            logger.debug(f"Extracted selection_criteria: {selection_criteria}")
+            return keyword_id, selection_criteria
+        except (ValueError, IndexError):
+            raise ValueError("Use /keyword <keyword_id> <optional-criteria>")
+        
+    def _format_explore_candidates(self, candidates: list, messages: list[BaseMessage]) -> dict:
         """
-        Async invoke the agent with a user message.
+        Format the candidates for the /keyword command.
 
         Args:
-            message: User message to process.
-            chat_history: Optional list of previous messages for context.
-
-        Returns:
-            Dictionary with response and updated message history.
+            candidates: List of candidate posts.
+            messages: The current message history.
         """
-        messages = chat_history or []
-        messages.append(HumanMessage(content=message))
-
-        initial_state = {
+        return {
+            "retrieved": candidates,
+            "selected_id": None,
+            "keywords": [],
+            "selected_post": None,
+            "response": None,
             "messages": messages,
-            "candidates": [],
-            "selected_post_id": None,
+        }
+
+    def _build_explore_state(self, messages: list[BaseMessage], candidates: list[dict], selected_post_id: int | None) -> AgentsState:
+        """
+        Build the state for the /keyword command.
+
+        Args:
+            messages: The current message history.
+            candidates: List of candidate posts.
+            selected_post_id: The ID of the selected post.
+        """
+        return {
+            "messages": messages,
+            "candidates": candidates,
+            "selected_post_id": selected_post_id,
             "keywords": [],
             "post_details": None,
             "response": None,
         }
 
-        result = await self.graph.ainvoke(initial_state)
+    def _preserve_keyword_ids(self, state: AgentsState):
+        """Preserve the last keyword IDs for future reference."""
+        self.last_keyword_ids = [k["id"] for k in state.get("keywords", [])]
 
-        return {
-            "retrieved": result["candidates"],
-            "selected_id": result["selected_post_id"],
-            "keywords": result.get("keywords", []),
-            "selected_post": result["post_details"],
-            "response": result["response"],
-            "messages": result["messages"],
-        }
+    async def ainvoke(self, message: str, chat_history: list | None = None) -> dict:
+        messages = list(chat_history) if chat_history else []
+        messages.append(HumanMessage(content=message))
+
+        state = self._build_initial_state(messages)
+        result = await self.graph.ainvoke(state)
+        return self._format_result(result)
 
         
