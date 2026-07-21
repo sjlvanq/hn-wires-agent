@@ -9,14 +9,16 @@ from embeddings import OllamaEmbeddings
 
 
 class SearchSimilarByEmbeddingInput(BaseModel):
-    """Input schema for similarity search tool."""
+    """Pydantic model describing the arguments for the embedding search tool.
+    """
 
     query: str = Field(description="Query text to find similar news")
     top_k: int = Field(default=3, description="Number of similar results to return")
 
 
 class SearchSimilarByEmbeddingTool:
-    """Tool for searching similar news posts using vector embeddings."""
+    """Encapsulates vector‑based semantic search over news posts.
+    """
 
     name = "search_similar"
     description = "Search for Hacker News posts similar to a query using semantic search with embeddings."
@@ -26,26 +28,32 @@ class SearchSimilarByEmbeddingTool:
         repository: Optional[NewsRepository] = None,
         embeddings: Optional[OllamaEmbeddings] = None,
     ):
-        """
-        Initialize similarity search tool.
+        """Create a new :class:`SearchSimilarByEmbeddingTool`.
 
-        Args:
-            repository: News repository instance. If None, creates new instance.
-            embeddings: Embeddings instance. If None, creates new instance.
+        Parameters
+        ----------
+        repository : NewsRepository | None
+            Repository for accessing stored news.  Defaults to a new instance.
+        embeddings : OllamaEmbeddings | None
+            Embedding generator.  Defaults to a new instance.
         """
         self.repository = repository or NewsRepository()
         self.embeddings = embeddings or OllamaEmbeddings()
 
     def search(self, query: str, top_k: int = 3) -> list[dict]:
-        """
-        Search similar posts using vector similarity.
+        """Return posts similar to *query*.
 
-        Args:
-            query: Query text.
-            top_k: Number of results to return.
+        Parameters
+        ----------
+        query : str
+            Text whose semantic similarity to stored posts is evaluated.
+        top_k : int, default 3
+            Number of top results to return.
 
-        Returns:
-            list[dict] with search results.
+        Returns
+        -------
+        list[dict]
+            List of dictionaries describing each matching post.
         """
         # Deprecation notice: prefer calling the StructuredTool via `as_tool().run(...)`
         warnings.warn(
@@ -80,7 +88,8 @@ class SearchSimilarByEmbeddingTool:
         return output
 
     def as_tool(self) -> StructuredTool:
-        """Convert to LangChain StructuredTool."""
+        """Exposed as a :class:`StructuredTool` for LangChain adapters.
+        """
         return StructuredTool.from_function(
             func=self.search,
             name=self.name,
@@ -90,14 +99,16 @@ class SearchSimilarByEmbeddingTool:
 
 
 class SearchSimilarByKeywordInput(BaseModel):
-    """Input schema for keyword similarity search tool."""
+    """Pydantic schema for the keyword‑based similarity search tool.
+    """
 
     keyword_id: int = Field(description="ID of the keyword to use for similarity search")
     top_k: int = Field(default=5, description="Number of similar results to return")
 
 
 class SearchSimilarByKeywordTool:
-    """Tool for searching similar news posts using keyword vector similarity."""
+    """Search for posts using the vector similarity of keyword embeddings.
+    """
 
     name = "search_similar_by_keyword"
     description = "Search for Hacker News posts similar to a keyword using vector similarity search over keywords."
@@ -106,24 +117,29 @@ class SearchSimilarByKeywordTool:
         self,
         repository: Optional[NewsRepository] = None,
     ):
-        """
-        Initialize keyword similarity search tool.
+        """Create a new :class:`SearchSimilarByKeywordTool`.
 
-        Args:
-            repository: News repository instance. If None, creates new instance.
+        Parameters
+        ----------
+        repository : NewsRepository | None
+            Repository for accessing news data.  Defaults to a new instance.
         """
         self.repository = repository or NewsRepository()
 
     def search(self, keyword_id: int, top_k: int = 5) -> list[dict]:
-        """
-        Search similar posts using keyword vector similarity.
+        """Return posts similar to *keyword_id*.
 
-        Args:
-            keyword_id: ID of the keyword to use for similarity search.
-            top_k: Number of results to return.
+        Parameters
+        ----------
+        keyword_id : int
+            Identifier of the keyword to query.
+        top_k : int, default 5
+            Number of results to return.
 
-        Returns:
-            list[dict] with search results.
+        Returns
+        -------
+        list[dict]
+            List of dictionaries describing each matching post.
         """
         # Deprecation notice: prefer calling the StructuredTool via `as_tool().run(...)`
         warnings.warn(
@@ -155,7 +171,8 @@ class SearchSimilarByKeywordTool:
         return output
 
     def as_tool(self) -> StructuredTool:
-        """Convert to LangChain StructuredTool."""
+        """Expose as a :class:`StructuredTool` for LangChain integration.
+        """
         return StructuredTool.from_function(
             func=self.search,
             name=self.name,

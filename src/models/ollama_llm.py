@@ -8,7 +8,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 class OllamaLLM:
-    """Wrapper for Ollama LLM."""
+    """Thin wrapper around :class:`langchain_ollama.ChatOllama`.
+    """
 
     def __init__(
         self,
@@ -17,18 +18,30 @@ class OllamaLLM:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         num_ctx: Optional[int] = None,
-        reasoning: Optional[bool] = None
+        reasoning: Optional[bool] = None,
     ):
-        """
-        Initialize Ollama LLM.
+        """Create a new :class:`OllamaLLM` instance.
 
-        Args:
-            model: Ollama model name. Defaults to settings.orchestrator_llm_model.
-            base_url: Ollama base URL. Defaults to settings.ollama_base_url.
-            temperature: Generation temperature. Defaults to settings.orchestrator_temperature.
-            max_tokens: Maximum tokens to generate. Defaults to settings.orchestrator_max_tokens.
-            num_ctx: Number of context tokens. Defaults to settings.orchestrator_num_ctx.
-            reasoning: Enable reasoning capabilities. Defaults to settings.orchestrator_reasoning.
+        Parameters
+        ----------
+        model : str | None
+            Name of the Ollama model to use.  Defaults to
+            :data:`settings.orchestrator_llm_model`.
+        base_url : str | None
+            Base URL for the Ollama server.  Defaults to
+            :data:`settings.ollama_base_url`.
+        temperature : float | None
+            Sampling temperature.  Defaults to
+            :data:`settings.orchestrator_temperature`.
+        max_tokens : int | None
+            Maximum number of tokens to return.  Defaults to
+            :data:`settings.orchestrator_max_tokens`.
+        num_ctx : int | None
+            Number of context tokens to keep.  Defaults to
+            :data:`settings.orchestrator_num_ctx`.
+        reasoning : bool | None
+            Pass-through flag enabling reasoning.  Defaults to
+            :data:`settings.orchestrator_reasoning`.
         """
         self.model = model or settings.orchestrator_llm_model
         self.base_url = base_url or settings.ollama_base_url
@@ -52,15 +65,19 @@ class OllamaLLM:
         return self._llm
 
     def invoke(self, prompt: str, **kwargs) -> str:
-        """
-        Invoke the LLM with a prompt.
+        """Send a prompt to the underlying model and return the text.
 
-        Args:
-            prompt: Input prompt.
-            **kwargs: Additional arguments for the LLM.
+        Parameters
+        ----------
+        prompt : str
+            Prompt string to send to the LLM.
+        **kwargs : Any
+            Additional arguments forwarded to ``ChatOllama.invoke``.
 
-        Returns:
-            Generated response text.
+        Returns
+        -------
+        str
+            The content of the model's response.
         """
         response = self._llm.invoke(prompt, **kwargs)
         logger.debug(f"LLM response:\n{response}")

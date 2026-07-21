@@ -3,15 +3,20 @@ from config.settings import settings
 
 
 class OllamaEmbeddings:
-    """Wrapper for Ollama embeddings optimized for small models."""
+    """Thin wrapper around :class:`langchain_ollama.OllamaEmbeddings`.
+    """
 
     def __init__(self, model: str | None = None, base_url: str | None = None):
-        """
-        Initialize Ollama embeddings.
+        """Create an embeddings instance.
 
-        Args:
-            model: Ollama model name. Defaults to settings.ollama_embedding_model.
-            base_url: Ollama base URL. Defaults to settings.ollama_base_url.
+        Parameters
+        ----------
+        model : str | None
+            Name of the Ollama embedding model.  Defaults to
+            :data:`settings.ollama_embedding_model`.
+        base_url : str | None
+            Base URL for the Ollama server.  Defaults to
+            :data:`settings.ollama_base_url`.
         """
         self.model = model or settings.ollama_embedding_model
         self.base_url = base_url or settings.ollama_base_url
@@ -21,25 +26,31 @@ class OllamaEmbeddings:
         )
 
     def embed_query(self, text: str) -> list[float]:
-        """
-        Generate embedding for a single query text.
+        """Return the embedding for a single piece of text.
 
-        Args:
-            text: Input text to embed.
+        Parameters
+        ----------
+        text : str
+            Text to embed.
 
-        Returns:
-            Embedding vector as list of floats.
+        Returns
+        -------
+        list[float]
+            Embedding vector.
         """
         return self._embeddings.embed_query(text)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        """
-        Generate embeddings for multiple documents.
+        """Return embeddings for a batch of documents.
 
-        Args:
-            texts: List of input texts to embed.
+        Parameters
+        ----------
+        texts : list[str]
+            List of strings to embed.
 
-        Returns:
+        Returns
+        -------
+        list[list[float]]
             List of embedding vectors.
         """
         return self._embeddings.embed_documents(texts)

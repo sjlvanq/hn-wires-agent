@@ -33,9 +33,10 @@ class AgentsState(TypedDict):
 
 
 class NewsAgent:
-    """
-    LangGraph-based agent designed to enrich the user's conversation
-    by systematically associating their inputs with Hacker News articles.
+    """NewsAgent
+    ---------
+    A :class:`LangGraph`‑based state machine that turns a natural‑language
+    query into an article selection and a conversational response.
     """
 
     def __init__(
@@ -46,13 +47,22 @@ class NewsAgent:
         repository: NewsRepository | None = None,
         embeddings: OllamaEmbeddings | None = None,
     ):
-        """
-        Initialize the news agent.
+        """Create a new :class:`NewsAgent` instance.
 
-        Args:
-            llm: Ollama LLM instance. If None, creates new instance.
-            repository: News repository instance. If None, creates new instance.
-            embeddings: Embeddings instance. If None, creates new instance.
+        Parameters
+        ----------
+        llm : OllamaLLM, optional
+            Primary language model used for the main conversational flow.
+        selector_llm : OllamaLLM, optional
+            Language model for the selector sub‑agent.
+        writer_llm : OllamaLLM, optional
+            Language model for the writer sub‑agent.
+        repository : NewsRepository, optional
+            Data access layer.  If *None*, a default :class:`NewsRepository`
+            is instantiated.
+        embeddings : OllamaEmbeddings, optional
+            Embedding function for semantic queries.  Defaults to a new
+            :class:`OllamaEmbeddings` instance.
         """
         self.llm = llm or OllamaLLM()
         self.selector = SelectorAgent(
@@ -108,7 +118,19 @@ class NewsAgent:
         return workflow.compile()
 
     def _retrieve_node(self, state: AgentsState) -> AgentsState:
-        """Retrieve candidate posts using semantic search."""
+        """Retrieve candidate posts using semantic search.
+
+        Parameters
+        ----------
+        state : AgentsState
+            Current graph state.
+
+        Returns
+        -------
+        AgentsState
+            Updated state with a ``candidates`` key containing search
+            results.
+        """
         messages = state.get("messages") or []
         if not messages:
             logger.error("No messages in state for retrieve node; aborting retrieval.")
@@ -129,7 +151,18 @@ class NewsAgent:
         }
 
     def _select_node(self, state: AgentsState) -> AgentsState:
-        """Select the single most relevant post ID from the retrieved candidates."""
+        """Select the single most relevant post ID from the retrieved candidates.
+
+        Parameters
+        ----------
+        state : AgentsState
+            Current graph state.
+
+        Returns
+        -------
+        AgentsState
+            Updated state containing ``selected_post_id``.
+        """
         messages = state.get("messages") or []
         if not messages:
             logger.error("No messages in state for select node; cannot select post.")
@@ -148,7 +181,18 @@ class NewsAgent:
         }
 
     def _keywords_node(self, state: AgentsState) -> AgentsState:
-        """Extract keywords from the selected post."""
+        """Extract keywords from the selected post.
+
+        Parameters
+        ----------
+        state : AgentsState
+            Current graph state.
+
+        Returns
+        -------
+        AgentsState
+            Updated state with a ``keywords`` list.
+        """
         keywords = []
 
         if state["selected_post_id"] is not None:
@@ -162,7 +206,18 @@ class NewsAgent:
         }
 
     def _fetch_node(self, state: AgentsState) -> AgentsState:
-        """Fetch the full post details for the selected post ID."""
+        """Fetch the full post details for the selected post ID.
+
+        Parameters
+        ----------
+        state : AgentsState
+            Current graph state.
+
+        Returns
+        -------
+        AgentsState
+            Updated state with ``post_details``.
+        """
 
         post_details = None
         if state["selected_post_id"] is not None:
@@ -176,7 +231,19 @@ class NewsAgent:
         }
 
     def _respond_node(self, state: AgentsState) -> AgentsState:
-        """Build the final response based on the selected post."""
+        """Build the final response based on the selected post.
+
+        Parameters
+        ----------
+        state : AgentsState
+            Current graph state.
+
+        Returns
+        -------
+        AgentsState
+            Updated state with the generated ``response`` and updated message
+            history.
+        """
         if state.get("skip_agent_response"):
             return {
                 **state,
@@ -220,9 +287,22 @@ class NewsAgent:
         }
 
     def _handle_internal_error(self, state: AgentsState, exc: Exception, user_facing_msg: str) -> AgentsState:
-        """Uniform internal error handler: log, append a system message and mark skip flag.
+        """Handle an unexpected exception in a node.
 
-        Returns an updated AgentsState suitable to be returned by graph nodes.
+        Parameters
+        ----------
+        state : AgentsState
+            The state before the error.
+        exc : Exception
+            The exception that was raised.
+        user_facing_msg : str
+            User‑friendly message to include as a system prompt.
+
+        Returns
+        -------
+        AgentsState
+            Updated state containing the system message, an empty ``response``
+            field, and the ``skip_agent_response`` flag set to ``True``.
         """
         logger.exception("Internal error in NewsAgent: %s", exc)
         messages = list(state.get("messages") or [])
@@ -230,15 +310,20 @@ class NewsAgent:
         return {**state, "messages": messages, "response": "", "skip_agent_response": True}
 
     def invoke(self, message: str, chat_history: list | None = None) -> dict:
-        """
-        Synchronous invocation of the conversational agent.
+        """Synchronously invoke the conversational agent.
 
-        Args:
-            message: User message to process.
-            chat_history: Optional list of previous messages for context.
+        Parameters
+        ----------
+        message : str
+            The user query.
+        chat_history : list | None, optional
+            Past conversation history to provide context to the model.
 
-        Returns:
-            Dictionary with response and updated message history.
+        Returns
+        -------
+        dict
+            Result dictionary containing ``response`` and updated message
+            history.
         """
         messages = list(chat_history) if chat_history else []
         messages.append(HumanMessage(content=message))
@@ -249,11 +334,36 @@ class NewsAgent:
         return self._invoke_default_flow(messages)
 
     def _invoke_default_flow(self, messages):
+        """Driver for the standard conversational flow.
+
+        Parameters
+        ----------
+        messages : list
+            List of :class:`BaseMessage` objects representing the chat
+            history.
+
+        Returns
+        -------
+        dict
+            Formatted result dictionary.
+        """
         state = self._build_initial_state(messages)
         result = self.graph.invoke(state)
         return self._format_result(result)
 
     def _build_initial_state(self, messages) -> AgentsState:
+        """Create the initial graph state for a new chat turn.
+
+        Parameters
+        ----------
+        messages : list
+            Current message history.
+
+        Returns
+        -------
+        AgentsState
+            Dictionary with all state keys initialized.
+        """
         return {
             "messages": messages,
             "candidates": [],
@@ -266,6 +376,19 @@ class NewsAgent:
         }
 
     def _format_result(self, result) -> dict:
+        """Normalize the graph output to the API contract.
+
+        Parameters
+        ----------
+        result : dict
+            Raw output from the :class:`StateGraph`.
+
+        Returns
+        -------
+        dict
+            Normalized dictionary with keys ``retrieved``, ``selected_id``,
+            ``keywords``, ``selected_post``, ``response`` and ``messages``.
+        """
         return {
             "retrieved": result["candidates"],
             "selected_id": result["selected_post_id"],
@@ -276,6 +399,19 @@ class NewsAgent:
         }
 
     def _invoke_explore_keyword_flow(self, messages: list[BaseMessage]):
+        """Process the special ``/keyword`` command.
+
+        Parameters
+        ----------
+        messages : list[BaseMessage]
+            List of chat messages; the last message is expected to contain
+            the ``/keyword`` command.
+
+        Returns
+        -------
+        dict
+            Normalized command output.
+        """
         messages = messages or []
         if not messages:
             logger.error("No messages provided to _invoke_explore_keyword_flow")
@@ -337,6 +473,18 @@ class NewsAgent:
         return self._format_result(state)
 
     def _parse_explore_keyword_command(self, message: str) -> tuple[int | None, str | None]:
+        """Parse a ``/keyword`` command.
+
+        Parameters
+        ----------
+        message : str
+            Raw user message containing the command.
+
+        Returns
+        -------
+        tuple[int | None, str | None]
+            ``keyword_id`` and an optional ``selection_criteria`` string.
+        """
         try:
             keyword_text = message[len("/keyword"):].strip()
             logger.debug(f"Parsing /keyword command: '{keyword_text}'")
