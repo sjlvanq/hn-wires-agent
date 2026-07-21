@@ -439,14 +439,15 @@ class NewsAgent:
         try:
             keyword_id, selection_criteria = self._parse_explore_keyword_command(messages[-1].content)
         except Exception as e:
-            logger.exception("Failed to parse /keyword command")
-            messages = [*messages, SystemMessage(content="Invalid usage of /keyword. Usage: /keyword <id> [criteria]")]
+            #logger.exception("Failed to parse /keyword command")
+            invalid_usage = "Invalid usage of /keyword. Usage: /keyword <id> [criteria]"
+            messages = [*messages, SystemMessage(content=invalid_usage)]
             return {
                 "retrieved": [],
                 "selected_id": None,
                 "keywords": [],
                 "selected_post": None,
-                "response": "Invalid command",
+                "response": invalid_usage,
                 "messages": messages,
                 "skip_retrieved": True,
             }
