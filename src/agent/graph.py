@@ -483,12 +483,12 @@ class NewsAgent:
             candidates = self.keyword_search_tool_structured.run({"keyword_id": keyword_id})
         except Exception as e:
             logger.exception("Keyword search failed in explore flow")
-            err_state = self._build_explore_state(messages, [], None)
+            err_state = self._build_command_state(messages, [], None)
             err_state = self._handle_internal_error(err_state, e, "Error searching by keyword; try again later.")
             return self._format_result(err_state)
 
         if not candidates:
-            state = self._build_explore_state(messages, [], None)
+            state = self._build_command_state(messages, [], None)
             state = self._handle_internal_error(
                 state, 
                 ValueError(f"No candidates found for keyword id {keyword_id}."), 
@@ -502,11 +502,11 @@ class NewsAgent:
         try:
             selected_post_id = self.selector.select(selection_criteria, candidates)
         except Exception as e:
-            err_state = self._build_explore_state(messages, candidates, None)
+            err_state = self._build_command_state(messages, candidates, None)
             err_state = self._handle_internal_error(err_state, e, "An error occurred while selecting the post. Try again later.")
             return self._format_result(err_state)
 
-        state = self._build_explore_state(messages, candidates, selected_post_id)
+        state = self._build_command_state(messages, candidates, selected_post_id)
         state = self._keywords_node(state)
         state = self._fetch_node(state)
         
@@ -554,7 +554,7 @@ class NewsAgent:
             "messages": messages,
         }
 
-    def _build_explore_state(self, messages: list[BaseMessage], candidates: list[dict], selected_post_id: int | None) -> AgentsState:
+    def _build_command_state(self, messages: list[BaseMessage], candidates: list[dict], selected_post_id: int | None) -> AgentsState:
         """
         Build the state for the /keyword command.
 
