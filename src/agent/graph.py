@@ -452,6 +452,33 @@ class NewsAgent:
                 "skip_retrieved": True,
             }
 
+        if keyword_id not in self.last_keyword_ids:
+            invalid_keyword = f"Keyword ID {keyword_id} is not in the last retrieved keywords. Use /keyword with a valid ID from the last response."
+            messages = [*messages, SystemMessage(content=invalid_keyword)]
+            return {
+                "retrieved": [],
+                "selected_id": None,
+                "keywords": [],
+                "selected_post": None,
+                "response": invalid_keyword,
+                "messages": messages,
+                "skip_retrieved": True,
+            }
+
+        # Paranoic check: the user might have provided an ID that was in the last response but has since been deleted.
+        if not self.repository.keyword_exists(keyword_id):
+            invalid_keyword = f"Keyword ID {keyword_id} does not exist."
+            messages = [*messages, SystemMessage(content=invalid_keyword)]
+            return {
+                "retrieved": [],
+                "selected_id": None,
+                "keywords": [],
+                "selected_post": None,
+                "response": invalid_keyword,
+                "messages": messages,
+                "skip_retrieved": True,
+            }
+
         try:
             candidates = self.keyword_search_tool_structured.run({"keyword_id": keyword_id})
         except Exception as e:

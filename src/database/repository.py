@@ -163,6 +163,28 @@ class NewsRepository:
         
         return post
 
+    def keyword_exists(self, keyword_id: int) -> bool:
+        """Check if a keyword exists in the database.
+
+        Parameters
+        ----------
+        keyword_id: int
+            Identifier of the keyword to check.
+
+        Returns
+        -------
+        bool
+            ``True`` if the keyword exists, ``False`` otherwise.
+        """
+        query = "SELECT 1 FROM keywords WHERE id = ?"
+        try:
+            results = self.db.execute_query(query, (keyword_id,))
+        except Exception as e:
+            logger.error(f"Error occurred while checking existence of keyword ID {keyword_id}: {e}")
+            raise NewsRepositoryException("Error occurred while checking existence of keyword") from e
+
+        return len(results) > 0
+
     def keywords_vector_search(self, keyword_id: int, top_k: Optional[int] = None) -> list[dict]:
         """Search posts that are close to the vector of ``keyword_id``.
 
