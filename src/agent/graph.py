@@ -330,6 +330,17 @@ class NewsAgent:
 
         if message.startswith("/keyword"):
             return self._invoke_explore_keyword_flow(messages)
+        elif message.startswith("/"):
+            messages = [*messages, SystemMessage(content="Unknown command. Use /keyword <id> [criteria] to explore related posts.")]
+            return {
+                "retrieved": [],
+                "selected_id": None,
+                "keywords": [],
+                "selected_post": None,
+                "response": "Unknown command",
+                "messages": messages,
+                "skip_retrieved": True,
+            }
 
         return self._invoke_default_flow(messages)
 
