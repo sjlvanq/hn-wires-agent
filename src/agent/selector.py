@@ -13,12 +13,25 @@ class SelectorAgent:
     def __init__(self, llm: OllamaLLM | None = None):
         self.llm = llm or OllamaLLM()
 
-    def select(self, user_query: str, candidates: list[dict[str, Any]]) -> int | None:
-        """Select the most relevant post ID from a list of candidate posts."""
+    def select(self, user_query: str | dict, candidates: list[dict[str, Any]]) -> int | None:
+        """Select the most relevant post ID from a list of candidate posts.
+
+        Accepts either a plain string `user_query` or a structured dict containing
+        a text/query field. This keeps calls simple (pass a string) while
+        allowing structured metadata in the future.
+        """
         if not candidates:
             return None
 
-        prompt = self._build_prompt(user_query, candidates)
+        if isinstance(user_query, str):
+            user_query_text = user_query
+        elif isinstance(user_query, dict):
+            # Prefer common keys if provided
+            user_query_text = user_query.get("query") or user_query.get("text") or str(user_query)
+        else:
+            user_query_text = str(user_query)
+
+        prompt = self._build_prompt(user_query_text, candidates)
 
         logger.debug(f"SelectorAgent request:\n{prompt}")
 
@@ -69,6 +82,6 @@ class SelectorAgent:
 
         return None
 
-    def select_batch(self, user_queries: Iterable[str], candidates: list[dict[str, Any]]) -> list[int | None]:
+    def select_batch(self, user_queries: Iterable[str | dict], candidates: list[dict[str, Any]]) -> list[int | None]:
         """Optional helper for selecting a post id for multiple queries."""
         return [self.select(query, candidates) for query in user_queries]
