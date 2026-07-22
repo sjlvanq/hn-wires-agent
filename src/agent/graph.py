@@ -437,10 +437,10 @@ class NewsAgent:
             }
 
         try:
-            keyword_id, selection_criteria = self._parse_explore_keyword_command(messages[-1].content)
+            command, keyword_id, selection_criteria = self._parse_command_with_id_and_criteria(messages[-1].content)
         except Exception as e:
             #logger.exception("Failed to parse /keyword command")
-            invalid_usage = "Invalid usage of /keyword. Usage: /keyword <id> [criteria]"
+            invalid_usage = f"Invalid usage of {command}. Usage: {command} <id> [criteria]"
             messages = [*messages, SystemMessage(content=invalid_usage)]
             return {
                 "retrieved": [],
@@ -512,6 +512,30 @@ class NewsAgent:
         
         self._preserve_keyword_ids(state)
         return self._format_result(state)
+
+    def _parse_command_with_id_and_criteria(self, message: str) -> tuple[str, int, str | None]:
+        """Parse a command with an ID and optional criteria.
+
+        Parameters
+        ----------
+        message : str
+            Raw user message containing the command.
+
+        Returns
+        -------
+        tuple[str, int, str | None]
+            The command, the ID, and the optional selection criteria.
+        """
+        try:
+            parts = message.strip().split(maxsplit=2)
+            command = parts[0]
+            id_part = int(parts[1])
+            criteria = parts[2] if len(parts) > 2 else None
+            return command, id_part, criteria
+        except IndexError:
+            raise ValueError(f"Invalid command format. Use {command} <id> <optional-criteria>")
+        except ValueError:
+            raise ValueError(f"Invalid ID format. Use {command} <id> <optional-criteria>")
 
     def _parse_explore_keyword_command(self, message: str) -> tuple[int | None, str | None]:
         """Parse a ``/keyword`` command.
