@@ -100,6 +100,8 @@ class NewsAgent:
         # Build the graph
         self.graph = self._build_graph()
 
+    # --- Graph Configuration ---
+
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph state machine."""
         workflow = StateGraph(AgentsState)
@@ -118,6 +120,185 @@ class NewsAgent:
         workflow.add_edge("respond", END)
 
         return workflow.compile()
+
+    # --- Public Interface ---
+
+    def invoke(self, message: str, chat_history: list | None = None) -> dict:
+        """Synchronously invoke the conversational agent.
+
+        Parameters
+        ----------
+        message : str
+            The user query.
+        chat_history : list | None, optional
+            Past conversation history to provide context to the model.
+
+        Returns
+        -------
+        dict
+            Result dictionary containing ``response`` and updated message
+            history.
+        """
+        messages = list(chat_history) if chat_history else []
+        messages.append(HumanMessage(content=message))
+
+        if message.startswith("/keyword"):
+            return self._invoke_explore_keyword_flow(messages)
+        elif message.startswith("/expand"):
+            return self._invoke_expand_post_flow(messages)
+        elif message.startswith("/"):
+            messages = [*messages, SystemMessage(content="Unknown command. Use /keyword <id> [criteria] to explore related posts.")]
+            return {
+                "retrieved": [],
+                "selected_id": None,
+                "keywords": [],
+                "selected_post": None,
+                "response": "Unknown command",
+                "messages": messages,
+                "skip_retrieved": True,
+            }
+
+        return self._invoke_default_flow(messages)
+
+    async def ainvoke(self, message: str, chat_history: list | None = None) -> dict:
+        messages = list(chat_history) if chat_history else []
+        messages.append(HumanMessage(content=message))
+
+        state = self._build_initial_state(messages)
+        result = await self.graph.ainvoke(state)
+        return self._format_result(result)
+
+    # --- Execution Flows ---
+
+    def _invoke_default_flow(self, messages):
+        """Driver for the standard conversational flow.
+
+        Parameters
+        ----------
+        messages : list
+            List of :class:`BaseMessage` objects representing the chat
+            history.
+
+        Returns
+        -------
+        dict
+            Formatted result dictionary.
+        """
+        state = self._build_initial_state(messages)
+        result = self.graph.invoke(state)
+        return self._format_result(result)
+
+    def _invoke_explore_keyword_flow(self, messages: list[BaseMessage]):
+        """Process the special ``/keyword`` command.
+
+        Parameters
+        ----------
+        messages : list[BaseMessage]
+            List of chat messages; the last message is expected to contain
+            the ``/keyword`` command.
+
+        Returns
+        -------
+        dict
+            Normalized command output.
+        """
+        messages, err = self._ensure_messages(messages)
+        if err:
+            return err
+
+        try:
+            command, keyword_id, selection_criteria = self._parse_command_with_id_and_criteria(messages[-1].content)
+        except Exception as e:
+            #logger.exception("Failed to parse /keyword command")
+            return self._command_error_response(messages, str(e))
+
+        if keyword_id not in self.last_keyword_ids:
+            invalid_keyword = f"Keyword ID {keyword_id} is not in the last retrieved keywords. Use /keyword with a valid ID from the last response."
+            return self._command_error_response(messages, invalid_keyword)
+
+        # Paranoic check: the user might have provided an ID that was in the last response but has since been deleted.
+        if not self.repository.keyword_exists(keyword_id):
+            invalid_keyword = f"Keyword ID {keyword_id} does not exist."
+            return self._command_error_response(messages, invalid_keyword)
+
+        try:
+            candidates = self.keyword_search_tool_structured.run({"keyword_id": keyword_id})
+        except Exception as e:
+            logger.exception("Keyword search failed in explore flow")
+            return self._handle_internal_error(self._build_command_state(messages, [], None), e, "Error searching by keyword; try again later.")
+
+        if not candidates:
+            state = self._build_command_state(messages, [], None)
+            state = self._handle_internal_error(
+                state, 
+                ValueError(f"No candidates found for keyword id {keyword_id}."), 
+                f"No posts related to keyword {keyword_id} were found."
+            )
+            return self._format_result(state)
+
+        state = self._build_command_state(messages, candidates, None)
+        self._preserve_posts_ids(state)
+
+        if selection_criteria is None:
+            return self._format_explore_candidates(candidates, messages)
+
+        try:
+            selected_post_id = self.selector.select(selection_criteria, candidates)
+        except Exception as e:
+            err_state = self._build_command_state(messages, candidates, None)
+            err_state = self._handle_internal_error(err_state, e, "An error occurred while selecting the post. Try again later.")
+            return self._format_result(err_state)
+
+        state = self._build_command_state(messages, candidates, selected_post_id)
+        state = self._keywords_node(state)
+        state = self._fetch_node(state)
+        
+        self._preserve_keyword_ids(state)
+
+        return self._format_result(state)
+
+    def _invoke_expand_post_flow(self, messages: list[BaseMessage]):
+        """Process the special ``/expand`` command.
+
+        Parameters
+        ----------
+        messages : list[BaseMessage]
+            List of chat messages; the last message is expected to contain
+            the ``/expand`` command.
+
+        Returns
+        -------
+        dict
+            Normalized command output.
+        """
+        messages, err = self._ensure_messages(messages)
+        if err:
+            return err
+
+        try:
+            command, post_id = self._parse_command_with_id(messages[-1].content)
+        except Exception as e:
+            #invalid_usage = f"Invalid usage of {command}. Usage: {command} <post_id>"
+            return self._command_error_response(messages, str(e))
+
+        if post_id not in self.last_retrieved_posts_ids:
+            invalid_post_id = f"Post ID {post_id} is not in the last retrieved posts. Use /expand with a valid ID from the last response."
+            return self._command_error_response(messages, invalid_post_id)
+
+        # Paranoic check: the user might have provided an ID that was in the last response but has since been deleted.
+        if not self.repository.post_exists(post_id):
+            invalid_post = f"Post ID {post_id} does not exist."
+            return self._command_error_response(messages, invalid_post)
+
+        state = self._build_command_state(messages, [], post_id)
+        state = self._fetch_node(state)
+        state = self._keywords_node(state)
+
+        self._preserve_keyword_ids(state)
+
+        return self._format_result({**state, "skip_retrieved": True})
+
+    # --- Graph Nodes ---
 
     def _retrieve_node(self, state: AgentsState) -> AgentsState:
         """Retrieve candidate posts using semantic search.
@@ -292,83 +473,7 @@ class NewsAgent:
             "messages": messages,
         }
 
-    def _handle_internal_error(self, state: AgentsState, exc: Exception, user_facing_msg: str) -> AgentsState:
-        """Handle an unexpected exception in a node.
-
-        Parameters
-        ----------
-        state : AgentsState
-            The state before the error.
-        exc : Exception
-            The exception that was raised.
-        user_facing_msg : str
-            User‑friendly message to include as a system prompt.
-
-        Returns
-        -------
-        AgentsState
-            Updated state containing the system message, an empty ``response``
-            field, and the ``skip_agent_response`` flag set to ``True``.
-        """
-        logger.exception("Internal error in NewsAgent: %s", exc)
-        messages = list(state.get("messages") or [])
-        messages.append(SystemMessage(content=user_facing_msg))
-        return {**state, "messages": messages, "response": "", "skip_agent_response": True}
-
-    def invoke(self, message: str, chat_history: list | None = None) -> dict:
-        """Synchronously invoke the conversational agent.
-
-        Parameters
-        ----------
-        message : str
-            The user query.
-        chat_history : list | None, optional
-            Past conversation history to provide context to the model.
-
-        Returns
-        -------
-        dict
-            Result dictionary containing ``response`` and updated message
-            history.
-        """
-        messages = list(chat_history) if chat_history else []
-        messages.append(HumanMessage(content=message))
-
-        if message.startswith("/keyword"):
-            return self._invoke_explore_keyword_flow(messages)
-        elif message.startswith("/expand"):
-            return self._invoke_expand_post_flow(messages)
-        elif message.startswith("/"):
-            messages = [*messages, SystemMessage(content="Unknown command. Use /keyword <id> [criteria] to explore related posts.")]
-            return {
-                "retrieved": [],
-                "selected_id": None,
-                "keywords": [],
-                "selected_post": None,
-                "response": "Unknown command",
-                "messages": messages,
-                "skip_retrieved": True,
-            }
-
-        return self._invoke_default_flow(messages)
-
-    def _invoke_default_flow(self, messages):
-        """Driver for the standard conversational flow.
-
-        Parameters
-        ----------
-        messages : list
-            List of :class:`BaseMessage` objects representing the chat
-            history.
-
-        Returns
-        -------
-        dict
-            Formatted result dictionary.
-        """
-        state = self._build_initial_state(messages)
-        result = self.graph.invoke(state)
-        return self._format_result(result)
+    # --- State & Formatting ---
 
     def _build_initial_state(self, messages) -> AgentsState:
         """Create the initial graph state for a new chat turn.
@@ -392,6 +497,26 @@ class NewsAgent:
             "response": None,
             "skip_agent_response": False,
             "last_keywords_ids": [],
+        }
+
+    def _build_command_state(self, messages: list[BaseMessage], candidates: list[dict], selected_post_id: int | None) -> AgentsState:
+        """
+        Build the state for the /keyword command.
+
+        Args:
+            messages: The current message history.
+            candidates: List of candidate posts.
+            selected_post_id: The ID of the selected post.
+        """
+        return {
+            "messages": messages,
+            "candidates": candidates,
+            "selected_post_id": selected_post_id,
+            "keywords": [],
+            "post_details": None,
+            "response": None,
+            "skip_agent_response": False,
+            "last_keywords_ids": self.last_keyword_ids,
         }
 
     def _format_result(self, result) -> dict:
@@ -419,115 +544,47 @@ class NewsAgent:
             "skip_retrieved": result.get("skip_retrieved", False),
         }
 
-    def _invoke_explore_keyword_flow(self, messages: list[BaseMessage]):
-        """Process the special ``/keyword`` command.
+    def _format_explore_candidates(self, candidates: list, messages: list[BaseMessage]) -> dict:
+        """
+        Format the candidates for the /keyword command.
+
+        Args:
+            candidates: List of candidate posts.
+            messages: The current message history.
+        """
+        return {
+            "retrieved": candidates,
+            "selected_id": None,
+            "keywords": [],
+            "selected_post": None,
+            "response": None,
+            "messages": messages,
+        }
+
+    # --- Helpers & Utilities ---
+
+    def _parse_command_with_id(self, message: str) -> tuple[str, int]:
+        """Parse a command with an ID.
 
         Parameters
         ----------
-        messages : list[BaseMessage]
-            List of chat messages; the last message is expected to contain
-            the ``/keyword`` command.
+        message : str
+            Raw user message containing the command.
 
         Returns
         -------
-        dict
-            Normalized command output.
+        tuple[str, int]
+            The command and the ID.
         """
-        messages, err = self._ensure_messages(messages)
-        if err:
-            return err
-
         try:
-            command, keyword_id, selection_criteria = self._parse_command_with_id_and_criteria(messages[-1].content)
-        except Exception as e:
-            #logger.exception("Failed to parse /keyword command")
-            return self._command_error_response(messages, str(e))
-
-        if keyword_id not in self.last_keyword_ids:
-            invalid_keyword = f"Keyword ID {keyword_id} is not in the last retrieved keywords. Use /keyword with a valid ID from the last response."
-            return self._command_error_response(messages, invalid_keyword)
-
-        # Paranoic check: the user might have provided an ID that was in the last response but has since been deleted.
-        if not self.repository.keyword_exists(keyword_id):
-            invalid_keyword = f"Keyword ID {keyword_id} does not exist."
-            return self._command_error_response(messages, invalid_keyword)
-
-        try:
-            candidates = self.keyword_search_tool_structured.run({"keyword_id": keyword_id})
-        except Exception as e:
-            logger.exception("Keyword search failed in explore flow")
-            return self._handle_internal_error(self._build_command_state(messages, [], None), e, "Error searching by keyword; try again later.")
-
-        if not candidates:
-            state = self._build_command_state(messages, [], None)
-            state = self._handle_internal_error(
-                state, 
-                ValueError(f"No candidates found for keyword id {keyword_id}."), 
-                f"No posts related to keyword {keyword_id} were found."
-            )
-            return self._format_result(state)
-
-        state = self._build_command_state(messages, candidates, None)
-        self._preserve_posts_ids(state)
-
-        if selection_criteria is None:
-            return self._format_explore_candidates(candidates, messages)
-
-        try:
-            selected_post_id = self.selector.select(selection_criteria, candidates)
-        except Exception as e:
-            err_state = self._build_command_state(messages, candidates, None)
-            err_state = self._handle_internal_error(err_state, e, "An error occurred while selecting the post. Try again later.")
-            return self._format_result(err_state)
-
-        state = self._build_command_state(messages, candidates, selected_post_id)
-        state = self._keywords_node(state)
-        state = self._fetch_node(state)
-        
-        self._preserve_keyword_ids(state)
-
-        return self._format_result(state)
-
-    def _invoke_expand_post_flow(self, messages: list[BaseMessage]):
-        """Process the special ``/expand`` command.
-
-        Parameters
-        ----------
-        messages : list[BaseMessage]
-            List of chat messages; the last message is expected to contain
-            the ``/expand`` command.
-
-        Returns
-        -------
-        dict
-            Normalized command output.
-        """
-        messages, err = self._ensure_messages(messages)
-        if err:
-            return err
-
-        try:
-            command, post_id = self._parse_command_with_id(messages[-1].content)
-        except Exception as e:
-            #invalid_usage = f"Invalid usage of {command}. Usage: {command} <post_id>"
-            return self._command_error_response(messages, str(e))
-
-        if post_id not in self.last_retrieved_posts_ids:
-            invalid_post_id = f"Post ID {post_id} is not in the last retrieved posts. Use /expand with a valid ID from the last response."
-            return self._command_error_response(messages, invalid_post_id)
-
-        # Paranoic check: the user might have provided an ID that was in the last response but has since been deleted.
-        if not self.repository.post_exists(post_id):
-            invalid_post = f"Post ID {post_id} does not exist."
-            return self._command_error_response(messages, invalid_post)
-
-        state = self._build_command_state(messages, [], post_id)
-        state = self._fetch_node(state)
-        state = self._keywords_node(state)
-
-        self._preserve_keyword_ids(state)
-
-        return self._format_result({**state, "skip_retrieved": True})
+            parts = message.strip().split(maxsplit=1)
+            command = parts[0]
+            id_part = int(parts[1])
+            return command, id_part
+        except IndexError:
+            raise ValueError(f"Invalid command format. Use {command} <id>")
+        except ValueError:
+            raise ValueError(f"Invalid ID format. Use {command} <id>")
 
     def _parse_command_with_id_and_criteria(self, message: str) -> tuple[str, int, str | None]:
         """Parse a command with an ID and optional criteria.
@@ -553,79 +610,6 @@ class NewsAgent:
         except ValueError:
             raise ValueError(f"Invalid ID format. Use {command} <id> <optional-criteria>")
 
-    def _parse_command_with_id(self, message: str) -> tuple[str, int]:
-        """Parse a command with an ID.
-
-        Parameters
-        ----------
-        message : str
-            Raw user message containing the command.
-
-        Returns
-        -------
-        tuple[str, int]
-            The command and the ID.
-        """
-        try:
-            parts = message.strip().split(maxsplit=1)
-            command = parts[0]
-            id_part = int(parts[1])
-            return command, id_part
-        except IndexError:
-            raise ValueError(f"Invalid command format. Use {command} <id>")
-        except ValueError:
-            raise ValueError(f"Invalid ID format. Use {command} <id>")
-
-
-    def _format_explore_candidates(self, candidates: list, messages: list[BaseMessage]) -> dict:
-        """
-        Format the candidates for the /keyword command.
-
-        Args:
-            candidates: List of candidate posts.
-            messages: The current message history.
-        """
-        return {
-            "retrieved": candidates,
-            "selected_id": None,
-            "keywords": [],
-            "selected_post": None,
-            "response": None,
-            "messages": messages,
-        }
-
-    def _build_command_state(self, messages: list[BaseMessage], candidates: list[dict], selected_post_id: int | None) -> AgentsState:
-        """
-        Build the state for the /keyword command.
-
-        Args:
-            messages: The current message history.
-            candidates: List of candidate posts.
-            selected_post_id: The ID of the selected post.
-        """
-        return {
-            "messages": messages,
-            "candidates": candidates,
-            "selected_post_id": selected_post_id,
-            "keywords": [],
-            "post_details": None,
-            "response": None,
-            "skip_agent_response": False,
-            "last_keywords_ids": self.last_keyword_ids,
-        }
-
-    def _command_error_response(self, messages, response_text):
-        messages = [*messages, SystemMessage(content=response_text)]
-        return {
-            "retrieved": [],
-            "selected_id": None,
-            "keywords": [],
-            "selected_post": None,
-            "response": response_text,
-            "messages": messages,
-            "skip_retrieved": True,
-        }
-
     def _ensure_messages(self, messages):
         if not messages:
             return None, self._command_error_response(messages, "No message context provided")
@@ -640,12 +624,38 @@ class NewsAgent:
         if state.get("candidates"):
             self.last_retrieved_posts_ids = [post["id"] for post in state["candidates"]]
 
-    async def ainvoke(self, message: str, chat_history: list | None = None) -> dict:
-        messages = list(chat_history) if chat_history else []
-        messages.append(HumanMessage(content=message))
 
-        state = self._build_initial_state(messages)
-        result = await self.graph.ainvoke(state)
-        return self._format_result(result)
+    def _command_error_response(self, messages, response_text):
+        messages = [*messages, SystemMessage(content=response_text)]
+        return {
+            "retrieved": [],
+            "selected_id": None,
+            "keywords": [],
+            "selected_post": None,
+            "response": response_text,
+            "messages": messages,
+            "skip_retrieved": True,
+        }
 
-        
+    def _handle_internal_error(self, state: AgentsState, exc: Exception, user_facing_msg: str) -> AgentsState:
+        """Handle an unexpected exception in a node.
+
+        Parameters
+        ----------
+        state : AgentsState
+            The state before the error.
+        exc : Exception
+            The exception that was raised.
+        user_facing_msg : str
+            User‑friendly message to include as a system prompt.
+
+        Returns
+        -------
+        AgentsState
+            Updated state containing the system message, an empty ``response``
+            field, and the ``skip_agent_response`` flag set to ``True``.
+        """
+        logger.exception("Internal error in NewsAgent: %s", exc)
+        messages = list(state.get("messages") or [])
+        messages.append(SystemMessage(content=user_facing_msg))
+        return {**state, "messages": messages, "response": "", "skip_agent_response": True}
