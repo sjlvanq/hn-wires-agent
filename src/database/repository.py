@@ -163,6 +163,27 @@ class NewsRepository:
         
         return post
 
+    def post_exists(self, post_id: int) -> bool:
+        """Check if a post exists in the database.
+
+        Parameters
+        ----------
+        post_id: int
+            Identifier of the post to check.
+
+        Returns
+        -------
+        bool
+            ``True`` if the post exists, ``False`` otherwise.
+        """
+        try:
+            results = self._get_post_by_id(post_id)
+        except Exception as e:
+            logger.error(f"Error occurred while checking existence of post ID {post_id}: {e}")
+            raise NewsRepositoryException("Error occurred while checking existence of post") from e
+
+        return results is not None
+
     def keyword_exists(self, keyword_id: int) -> bool:
         """Check if a keyword exists in the database.
 

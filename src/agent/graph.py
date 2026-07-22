@@ -30,6 +30,7 @@ class AgentsState(TypedDict):
     response: str | None
     skip_agent_response: bool
     last_keywords_ids: list[int] = []
+    last_retrieved_posts_ids: list[int] = []
 
 
 class NewsAgent:
@@ -94,6 +95,7 @@ class NewsAgent:
         self.keyword_search_tool = SearchSimilarByKeywordTool(self.repository)
         self.keyword_search_tool_structured = self.keyword_search_tool.as_tool()
         self.last_keyword_ids: list[int] = []
+        self.last_retrieved_posts_ids: list[int] = []
 
         # Build the graph
         self.graph = self._build_graph()
@@ -278,6 +280,10 @@ class NewsAgent:
         if keywords:
             self.last_keyword_ids = [k["id"] for k in keywords]
 
+        candidates = state.get("candidates", [])
+        if candidates:
+            self.last_retrieved_posts_ids = [k["id"] for k in candidates]
+
         messages = [*state["messages"], SystemMessage(content=response_text)]
         return {
             **state,
@@ -330,6 +336,8 @@ class NewsAgent:
 
         if message.startswith("/keyword"):
             return self._invoke_explore_keyword_flow(messages)
+        elif message.startswith("/expand"):
+            return self._invoke_expand_post_flow(messages)
         elif message.startswith("/"):
             messages = [*messages, SystemMessage(content="Unknown command. Use /keyword <id> [criteria] to explore related posts.")]
             return {
@@ -398,7 +406,8 @@ class NewsAgent:
         -------
         dict
             Normalized dictionary with keys ``retrieved``, ``selected_id``,
-            ``keywords``, ``selected_post``, ``response`` and ``messages``.
+            ``keywords``, ``selected_post``, ``response``, ``messages`` and 
+            ``skip_retrieved``.
         """
         return {
             "retrieved": result["candidates"],
@@ -407,6 +416,7 @@ class NewsAgent:
             "selected_post": result["post_details"],
             "response": result["response"],
             "messages": result["messages"],
+            "skip_retrieved": result.get("skip_retrieved", False),
         }
 
     def _invoke_explore_keyword_flow(self, messages: list[BaseMessage]):
@@ -457,6 +467,9 @@ class NewsAgent:
             )
             return self._format_result(state)
 
+        state = self._build_command_state(messages, candidates, None)
+        self._preserve_posts_ids(state)
+
         if selection_criteria is None:
             return self._format_explore_candidates(candidates, messages)
 
@@ -472,7 +485,49 @@ class NewsAgent:
         state = self._fetch_node(state)
         
         self._preserve_keyword_ids(state)
+
         return self._format_result(state)
+
+    def _invoke_expand_post_flow(self, messages: list[BaseMessage]):
+        """Process the special ``/expand`` command.
+
+        Parameters
+        ----------
+        messages : list[BaseMessage]
+            List of chat messages; the last message is expected to contain
+            the ``/expand`` command.
+
+        Returns
+        -------
+        dict
+            Normalized command output.
+        """
+        messages, err = self._ensure_messages(messages)
+        if err:
+            return err
+
+        try:
+            command, post_id = self._parse_command_with_id(messages[-1].content)
+        except Exception as e:
+            #invalid_usage = f"Invalid usage of {command}. Usage: {command} <post_id>"
+            return self._command_error_response(messages, str(e))
+
+        if post_id not in self.last_retrieved_posts_ids:
+            invalid_post_id = f"Post ID {post_id} is not in the last retrieved posts. Use /expand with a valid ID from the last response."
+            return self._command_error_response(messages, invalid_post_id)
+
+        # Paranoic check: the user might have provided an ID that was in the last response but has since been deleted.
+        if not self.repository.post_exists(post_id):
+            invalid_post = f"Post ID {post_id} does not exist."
+            return self._command_error_response(messages, invalid_post)
+
+        state = self._build_command_state(messages, [], post_id)
+        state = self._fetch_node(state)
+        state = self._keywords_node(state)
+
+        self._preserve_keyword_ids(state)
+
+        return self._format_result({**state, "skip_retrieved": True})
 
     def _parse_command_with_id_and_criteria(self, message: str) -> tuple[str, int, str | None]:
         """Parse a command with an ID and optional criteria.
@@ -579,6 +634,11 @@ class NewsAgent:
     def _preserve_keyword_ids(self, state: AgentsState):
         """Preserve the last keyword IDs for future reference."""
         self.last_keyword_ids = [k["id"] for k in state.get("keywords", [])]
+
+    def _preserve_posts_ids(self, state: AgentsState):
+        """Preserve the last post IDs for future reference."""
+        if state.get("candidates"):
+            self.last_retrieved_posts_ids = [post["id"] for post in state["candidates"]]
 
     async def ainvoke(self, message: str, chat_history: list | None = None) -> dict:
         messages = list(chat_history) if chat_history else []
