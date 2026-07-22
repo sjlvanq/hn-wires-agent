@@ -13,7 +13,9 @@ class NewsRepositoryException(Exception):
 
 class NewsRepository:
     """Repository for accessing news data from SQLite database."""
-
+    
+    # 1. Setup
+    
     def __init__(self, db_connection: Optional[DatabaseConnection] = None):
         """Create a new :class:`NewsRepository`.
 
@@ -25,6 +27,244 @@ class NewsRepository:
             share a single database connection across several repositories.
         """
         self.db = db_connection or DatabaseConnection()
+
+    # 2. Simple Queries (Public)
+
+    def post_exists(self, post_id: int) -> bool:
+        """Check if a post exists in the database.
+
+        Parameters
+        ----------
+        post_id: int
+            Identifier of the post to check.
+
+        Returns
+        -------
+        bool
+            ``True`` if the post exists, ``False`` otherwise.
+        """
+        try:
+            results = self._get_post_by_id(post_id)
+        except Exception as e:
+            logger.error(f"Error occurred while checking existence of post ID {post_id}: {e}")
+            raise NewsRepositoryException("Error occurred while checking existence of post") from e
+
+        return results is not None
+
+    def keyword_exists(self, keyword_id: int) -> bool:
+        """Check if a keyword exists in the database.
+
+        Parameters
+        ----------
+        keyword_id: int
+            Identifier of the keyword to check.
+
+        Returns
+        -------
+        bool
+            ``True`` if the keyword exists, ``False`` otherwise.
+        """
+        query = "SELECT 1 FROM keywords WHERE id = ?"
+        try:
+            results = self.db.execute_query(query, (keyword_id,))
+        except Exception as e:
+            logger.error(f"Error occurred while checking existence of keyword ID {keyword_id}: {e}")
+            raise NewsRepositoryException("Error occurred while checking existence of keyword") from e
+
+        return len(results) > 0
+
+    def get_post_keywords(self, post_id: int) -> list[dict]:
+        """Return the list of keywords attached to a post.
+
+        Parameters
+        ----------
+        post_id: int
+            Identifier of the post whose keywords we want.
+
+        Returns
+        -------
+        list[dict]
+            Each dictionary contains the primary key ``id`` and the keyword
+            string under the key ``keyword``.  The list may be empty if the
+            post has no keywords.
+        """
+        query = """
+            SELECT id, keyword
+            FROM keywords
+            WHERE post_id = ?
+        """
+        try:
+            results = self.db.execute_query(query, (post_id,))
+        except Exception as e:
+            logger.error(f"Error occurred while fetching keywords for post ID {post_id}: {e}")
+            raise NewsRepositoryException("Error occurred while fetching keywords for post ID") from e
+        if results:
+            return [{"id": row["id"], "keyword": row["keyword"]} for row in results]
+        return []
+
+    def get_post_with_wire(self, post_id: int) -> Optional[dict]:
+        """Return a post enriched with wire information when available.
+
+        Parameters
+        ----------
+        post_id: int
+            Identifier of the post.
+
+        Returns
+        -------
+        Optional[dict]
+            ``None`` if the post does not exist.  Otherwise a dictionary with
+            all post columns and an optional ``wire`` key containing the
+            wire summary.
+        """
+        try:
+            post = self._get_post_by_id(post_id)
+        except Exception as e:
+            logger.error(f"Error occurred while fetching post by ID {post_id}: {e}")
+            raise NewsRepositoryException("Error occurred while fetching post by ID") from e
+
+        if not post:
+            return None
+
+        try:
+            wire = self._get_wire_by_post_id(post_id)
+        except Exception as e:
+            logger.error(f"Error occurred while fetching wire by post ID {post_id}: {e}")
+            raise NewsRepositoryException("Error occurred while fetching wire by post ID") from e
+        
+        if wire:
+            post["wire"] = wire.get('summary')
+        
+        return post
+
+    # 3. Advanced Vector Searches (Public)
+
+    def wires_vector_search(self, embedding: list[float], top_k: Optional[int] = None) -> list[dict]:
+        """Search *wires* on a user supplied embedding.
+
+        Parameters
+        ----------
+        embedding: list[float]
+            The query vector to compare against the ``vector`` column in
+            ``vec_wires``.
+        top_k: int | None
+            Maximum number of results to return; ``None`` falls back to
+            :pyattr:`settings.wires_vector_search_top_k`.
+
+        Returns
+        -------
+        list[dict]
+            Posts that match the embedding ranked by distance, each augmented
+            with a ``similarity`` key derived from the exponential decay of
+            distance.
+        """
+        if len(embedding) != settings.vector_search_vector_k:
+            raise ValueError(f"Embedding vector must have length {settings.vector_search_vector_k}, got {len(embedding)}")
+
+        if top_k is None:
+            top_k = settings.wires_vector_search_top_k
+
+        # Convert embedding to string format for sqlite-vec
+        embedding_str = ",".join(map(str, embedding))
+
+        query = f"""
+            SELECT
+                v.rowid,
+                v.distance,
+                w.summary,
+                w.post_id,
+                p.author, p.descendants, p.score, p.time, p.title, p.text, p.url
+            FROM vec_wires v
+            INNER JOIN wires w ON v.rowid = w.id
+            INNER JOIN posts p ON w.post_id = p.id
+            WHERE w.summary != '' AND v.k = ? AND v.embedding MATCH ?
+            ORDER BY v.distance
+        """
+        
+        try:
+            results = self.db.execute_query(query, (top_k, "["+embedding_str+"]"))
+        except Exception as e:
+            logger.error(f"Error executing wires vector search query: {e}")
+            raise NewsRepositoryException("Error occurred while executing wires vector search") from e
+
+        if not results:
+            return []
+        
+        # DEBUG
+        logger.debug(f"wires_vector_search db.execute_query:")
+        for row in results: logger.debug(dict(row))
+
+        posts = self._add_similarity_scores(results)
+
+        return posts
+
+    def keywords_vector_search(self, keyword_id: int, top_k: Optional[int] = None) -> list[dict]:
+        """Search posts that are close to the vector of ``keyword_id``.
+
+        Parameters
+        ----------
+        keyword_id: int
+            Identifier of a keyword row whose embedding is used as a query.
+        top_k: int | None
+            Number of top‑ranked results to return.  ``None`` defaults to
+            :pyattr:`settings.wires_vector_search_top_k`.
+
+        Returns
+        -------
+        list[dict]
+            A list of matching post records augmented with a ``similarity``
+            field.  Each item contains the post data, the matched keyword and
+            the full set of keywords for that post.
+        """
+        if top_k is None:
+            top_k = settings.wires_vector_search_top_k
+
+        query = f"""
+            SELECT
+                dvk.post_id,
+                dvk.keyword AS matched_keyword,
+                dvk.distance,
+                p.author,
+                p.time,
+                p.title,
+                p.url,
+                (
+                    SELECT GROUP_CONCAT(keyword, ', ')
+                    FROM keywords
+                    WHERE post_id = dvk.post_id
+                ) AS all_post_keywords
+            FROM (
+                SELECT
+                    v.rowid AS keyword_id,
+                    v.distance,
+                    k.post_id,
+                    k.keyword
+                FROM vec_keywords v
+                INNER JOIN keywords k ON v.rowid = k.id
+                WHERE v.k = ?
+                AND v.embedding MATCH (SELECT embedding FROM vec_keywords WHERE rowid = ?)
+            ) dvk
+            INNER JOIN posts p ON dvk.post_id = p.id
+            ORDER BY dvk.distance;
+        """
+
+        try:
+            results = self.db.execute_query(query, (top_k, keyword_id))
+        except Exception as e:
+            logger.error(f"Error executing wires vector search query: {e}")
+            raise NewsRepositoryException("Error occurred while executing wires vector search") from e
+
+        if not results:
+            return []
+
+        # DEBUG
+        logger.debug(f"keywords_vector_search db.execute_query:")
+        for row in results: logger.debug(dict(row))
+
+        keywords = self._add_similarity_scores(results)
+        return keywords
+
+    # 4. Internal Helpers (Private)
 
     def _get_post_by_id(self, post_id: int) -> Optional[dict]:
         """Return a post by its numeric ``id``.
@@ -126,236 +366,3 @@ class NewsRepository:
             similarity = math.exp(-distance)
             row["similarity"] = similarity
         return normalized
-
-
-    def get_post_with_wire(self, post_id: int) -> Optional[dict]:
-        """Return a post enriched with wire information when available.
-
-        Parameters
-        ----------
-        post_id: int
-            Identifier of the post.
-
-        Returns
-        -------
-        Optional[dict]
-            ``None`` if the post does not exist.  Otherwise a dictionary with
-            all post columns and an optional ``wire`` key containing the
-            wire summary.
-        """
-        try:
-            post = self._get_post_by_id(post_id)
-        except Exception as e:
-            logger.error(f"Error occurred while fetching post by ID {post_id}: {e}")
-            raise NewsRepositoryException("Error occurred while fetching post by ID") from e
-
-        if not post:
-            return None
-
-        try:
-            wire = self._get_wire_by_post_id(post_id)
-        except Exception as e:
-            logger.error(f"Error occurred while fetching wire by post ID {post_id}: {e}")
-            raise NewsRepositoryException("Error occurred while fetching wire by post ID") from e
-        
-        if wire:
-            post["wire"] = wire.get('summary')
-        
-        return post
-
-    def post_exists(self, post_id: int) -> bool:
-        """Check if a post exists in the database.
-
-        Parameters
-        ----------
-        post_id: int
-            Identifier of the post to check.
-
-        Returns
-        -------
-        bool
-            ``True`` if the post exists, ``False`` otherwise.
-        """
-        try:
-            results = self._get_post_by_id(post_id)
-        except Exception as e:
-            logger.error(f"Error occurred while checking existence of post ID {post_id}: {e}")
-            raise NewsRepositoryException("Error occurred while checking existence of post") from e
-
-        return results is not None
-
-    def keyword_exists(self, keyword_id: int) -> bool:
-        """Check if a keyword exists in the database.
-
-        Parameters
-        ----------
-        keyword_id: int
-            Identifier of the keyword to check.
-
-        Returns
-        -------
-        bool
-            ``True`` if the keyword exists, ``False`` otherwise.
-        """
-        query = "SELECT 1 FROM keywords WHERE id = ?"
-        try:
-            results = self.db.execute_query(query, (keyword_id,))
-        except Exception as e:
-            logger.error(f"Error occurred while checking existence of keyword ID {keyword_id}: {e}")
-            raise NewsRepositoryException("Error occurred while checking existence of keyword") from e
-
-        return len(results) > 0
-
-    def keywords_vector_search(self, keyword_id: int, top_k: Optional[int] = None) -> list[dict]:
-        """Search posts that are close to the vector of ``keyword_id``.
-
-        Parameters
-        ----------
-        keyword_id: int
-            Identifier of a keyword row whose embedding is used as a query.
-        top_k: int | None
-            Number of top‑ranked results to return.  ``None`` defaults to
-            :pyattr:`settings.wires_vector_search_top_k`.
-
-        Returns
-        -------
-        list[dict]
-            A list of matching post records augmented with a ``similarity``
-            field.  Each item contains the post data, the matched keyword and
-            the full set of keywords for that post.
-        """
-        if top_k is None:
-            top_k = settings.wires_vector_search_top_k
-
-        query = f"""
-            SELECT
-                dvk.post_id,
-                dvk.keyword AS matched_keyword,
-                dvk.distance,
-                p.author,
-                p.time,
-                p.title,
-                p.url,
-                (
-                    SELECT GROUP_CONCAT(keyword, ', ')
-                    FROM keywords
-                    WHERE post_id = dvk.post_id
-                ) AS all_post_keywords
-            FROM (
-                SELECT
-                    v.rowid AS keyword_id,
-                    v.distance,
-                    k.post_id,
-                    k.keyword
-                FROM vec_keywords v
-                INNER JOIN keywords k ON v.rowid = k.id
-                WHERE v.k = ?
-                AND v.embedding MATCH (SELECT embedding FROM vec_keywords WHERE rowid = ?)
-            ) dvk
-            INNER JOIN posts p ON dvk.post_id = p.id
-            ORDER BY dvk.distance;
-        """
-
-        try:
-            results = self.db.execute_query(query, (top_k, keyword_id))
-        except Exception as e:
-            logger.error(f"Error executing wires vector search query: {e}")
-            raise NewsRepositoryException("Error occurred while executing wires vector search") from e
-
-        if not results:
-            return []
-
-        # DEBUG
-        logger.debug(f"keywords_vector_search db.execute_query:")
-        for row in results: logger.debug(dict(row))
-
-        keywords = self._add_similarity_scores(results)
-        return keywords
-
-    def wires_vector_search(self, embedding: list[float], top_k: Optional[int] = None) -> list[dict]:
-        """Search *wires* on a user supplied embedding.
-
-        Parameters
-        ----------
-        embedding: list[float]
-            The query vector to compare against the ``vector`` column in
-            ``vec_wires``.
-        top_k: int | None
-            Maximum number of results to return; ``None`` falls back to
-            :pyattr:`settings.wires_vector_search_top_k`.
-
-        Returns
-        -------
-        list[dict]
-            Posts that match the embedding ranked by distance, each augmented
-            with a ``similarity`` key derived from the exponential decay of
-            distance.
-        """
-        if len(embedding) != settings.vector_search_vector_k:
-            raise ValueError(f"Embedding vector must have length {settings.vector_search_vector_k}, got {len(embedding)}")
-
-        if top_k is None:
-            top_k = settings.wires_vector_search_top_k
-
-        # Convert embedding to string format for sqlite-vec
-        embedding_str = ",".join(map(str, embedding))
-
-        query = f"""
-            SELECT
-                v.rowid,
-                v.distance,
-                w.summary,
-                w.post_id,
-                p.author, p.descendants, p.score, p.time, p.title, p.text, p.url
-            FROM vec_wires v
-            INNER JOIN wires w ON v.rowid = w.id
-            INNER JOIN posts p ON w.post_id = p.id
-            WHERE w.summary != '' AND v.k = ? AND v.embedding MATCH ?
-            ORDER BY v.distance
-        """
-        
-        try:
-            results = self.db.execute_query(query, (top_k, "["+embedding_str+"]"))
-        except Exception as e:
-            logger.error(f"Error executing wires vector search query: {e}")
-            raise NewsRepositoryException("Error occurred while executing wires vector search") from e
-
-        if not results:
-            return []
-        
-        # DEBUG
-        logger.debug(f"wires_vector_search db.execute_query:")
-        for row in results: logger.debug(dict(row))
-
-        posts = self._add_similarity_scores(results)
-
-        return posts
-
-    def get_post_keywords(self, post_id: int) -> list[dict]:
-        """Return the list of keywords attached to a post.
-
-        Parameters
-        ----------
-        post_id: int
-            Identifier of the post whose keywords we want.
-
-        Returns
-        -------
-        list[dict]
-            Each dictionary contains the primary key ``id`` and the keyword
-            string under the key ``keyword``.  The list may be empty if the
-            post has no keywords.
-        """
-        query = """
-            SELECT id, keyword
-            FROM keywords
-            WHERE post_id = ?
-        """
-        try:
-            results = self.db.execute_query(query, (post_id,))
-        except Exception as e:
-            logger.error(f"Error occurred while fetching keywords for post ID {post_id}: {e}")
-            raise NewsRepositoryException("Error occurred while fetching keywords for post ID") from e
-        if results:
-            return [{"id": row["id"], "keyword": row["keyword"]} for row in results]
-        return []
