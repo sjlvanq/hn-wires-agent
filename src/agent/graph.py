@@ -423,69 +423,30 @@ class NewsAgent:
         dict
             Normalized command output.
         """
-        messages = messages or []
-        if not messages:
-            logger.error("No messages provided to _invoke_explore_keyword_flow")
-            return {
-                "retrieved": [],
-                "selected_id": None,
-                "keywords": [],
-                "selected_post": None,
-                "response": "No message context provided",
-                "messages": messages,
-                "skip_retrieved": True,
-            }
+        messages, err = self._ensure_messages(messages)
+        if err:
+            return err
 
         try:
             command, keyword_id, selection_criteria = self._parse_command_with_id_and_criteria(messages[-1].content)
         except Exception as e:
             #logger.exception("Failed to parse /keyword command")
-            invalid_usage = f"Invalid usage of {command}. Usage: {command} <id> [criteria]"
-            messages = [*messages, SystemMessage(content=invalid_usage)]
-            return {
-                "retrieved": [],
-                "selected_id": None,
-                "keywords": [],
-                "selected_post": None,
-                "response": invalid_usage,
-                "messages": messages,
-                "skip_retrieved": True,
-            }
+            return self._command_error_response(messages, str(e))
 
         if keyword_id not in self.last_keyword_ids:
             invalid_keyword = f"Keyword ID {keyword_id} is not in the last retrieved keywords. Use /keyword with a valid ID from the last response."
-            messages = [*messages, SystemMessage(content=invalid_keyword)]
-            return {
-                "retrieved": [],
-                "selected_id": None,
-                "keywords": [],
-                "selected_post": None,
-                "response": invalid_keyword,
-                "messages": messages,
-                "skip_retrieved": True,
-            }
+            return self._command_error_response(messages, invalid_keyword)
 
         # Paranoic check: the user might have provided an ID that was in the last response but has since been deleted.
         if not self.repository.keyword_exists(keyword_id):
             invalid_keyword = f"Keyword ID {keyword_id} does not exist."
-            messages = [*messages, SystemMessage(content=invalid_keyword)]
-            return {
-                "retrieved": [],
-                "selected_id": None,
-                "keywords": [],
-                "selected_post": None,
-                "response": invalid_keyword,
-                "messages": messages,
-                "skip_retrieved": True,
-            }
+            return self._command_error_response(messages, invalid_keyword)
 
         try:
             candidates = self.keyword_search_tool_structured.run({"keyword_id": keyword_id})
         except Exception as e:
             logger.exception("Keyword search failed in explore flow")
-            err_state = self._build_command_state(messages, [], None)
-            err_state = self._handle_internal_error(err_state, e, "Error searching by keyword; try again later.")
-            return self._format_result(err_state)
+            return self._handle_internal_error(self._build_command_state(messages, [], None), e, "Error searching by keyword; try again later.")
 
         if not candidates:
             state = self._build_command_state(messages, [], None)
@@ -537,8 +498,8 @@ class NewsAgent:
         except ValueError:
             raise ValueError(f"Invalid ID format. Use {command} <id> <optional-criteria>")
 
-    def _parse_explore_keyword_command(self, message: str) -> tuple[int | None, str | None]:
-        """Parse a ``/keyword`` command.
+    def _parse_command_with_id(self, message: str) -> tuple[str, int]:
+        """Parse a command with an ID.
 
         Parameters
         ----------
@@ -547,20 +508,20 @@ class NewsAgent:
 
         Returns
         -------
-        tuple[int | None, str | None]
-            ``keyword_id`` and an optional ``selection_criteria`` string.
+        tuple[str, int]
+            The command and the ID.
         """
         try:
-            keyword_text = message[len("/keyword"):].strip()
-            logger.debug(f"Parsing /keyword command: '{keyword_text}'")
-            keyword_id = int(keyword_text.split()[0])
-            logger.debug(f"Extracted keyword_id: {keyword_id}")
-            selection_criteria = " ".join(keyword_text.split()[1:]) or None
-            logger.debug(f"Extracted selection_criteria: {selection_criteria}")
-            return keyword_id, selection_criteria
-        except (ValueError, IndexError):
-            raise ValueError("Use /keyword <keyword_id> <optional-criteria>")
-        
+            parts = message.strip().split(maxsplit=1)
+            command = parts[0]
+            id_part = int(parts[1])
+            return command, id_part
+        except IndexError:
+            raise ValueError(f"Invalid command format. Use {command} <id>")
+        except ValueError:
+            raise ValueError(f"Invalid ID format. Use {command} <id>")
+
+
     def _format_explore_candidates(self, candidates: list, messages: list[BaseMessage]) -> dict:
         """
         Format the candidates for the /keyword command.
@@ -594,7 +555,26 @@ class NewsAgent:
             "keywords": [],
             "post_details": None,
             "response": None,
+            "skip_agent_response": False,
+            "last_keywords_ids": self.last_keyword_ids,
         }
+
+    def _command_error_response(self, messages, response_text):
+        messages = [*messages, SystemMessage(content=response_text)]
+        return {
+            "retrieved": [],
+            "selected_id": None,
+            "keywords": [],
+            "selected_post": None,
+            "response": response_text,
+            "messages": messages,
+            "skip_retrieved": True,
+        }
+
+    def _ensure_messages(self, messages):
+        if not messages:
+            return None, self._command_error_response(messages, "No message context provided")
+        return messages, None
 
     def _preserve_keyword_ids(self, state: AgentsState):
         """Preserve the last keyword IDs for future reference."""
