@@ -103,7 +103,7 @@ class Settings(BaseSettings):
 
     # Vector Search Configuration
     wires_vector_search_top_k: int = Field(
-        default=5,
+        default=10,
         description="Number of top results to return from vector search"
     )
     wires_vector_search_threshold: float = Field(

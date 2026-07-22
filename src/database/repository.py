@@ -137,6 +137,26 @@ class NewsRepository:
         
         return post
 
+    def exclude_post(self, post_id: int) -> None:
+        """Mark a post as excluded in the database.
+
+        Parameters
+        ----------
+        post_id: int
+            Identifier of the post to exclude.
+
+        Raises
+        ------
+        NewsRepositoryException
+            If an error occurs while updating the database.
+        """
+        query = "UPDATE posts SET is_excluded = 1 WHERE id = ?"
+        try:
+            self.db.execute_query(query, (post_id,))
+        except Exception as e:
+            logger.error(f"Error occurred while excluding post ID {post_id}: {e}")
+            raise NewsRepositoryException("Error occurred while excluding post") from e
+
     # 3. Advanced Vector Searches (Public)
 
     def wires_vector_search(self, embedding: list[float], top_k: Optional[int] = None) -> list[dict]:
@@ -177,12 +197,17 @@ class NewsRepository:
             FROM vec_wires v
             INNER JOIN wires w ON v.rowid = w.id
             INNER JOIN posts p ON w.post_id = p.id
-            WHERE w.summary != '' AND v.k = ? AND v.embedding MATCH ?
+            WHERE w.summary != ''
+                AND p.is_excluded = 0
+                AND v.k = ? AND v.embedding MATCH ?
             ORDER BY v.distance
+            LIMIT ?
         """
         
         try:
-            results = self.db.execute_query(query, (top_k, "["+embedding_str+"]"))
+            # We request a few extra candidates (top_k + 5) from the vector index
+            # to compensate for posts that might be filtered out by 'is_excluded = 0'
+            results = self.db.execute_query(query, (top_k+5, "["+embedding_str+"]", top_k))
         except Exception as e:
             logger.error(f"Error executing wires vector search query: {e}")
             raise NewsRepositoryException("Error occurred while executing wires vector search") from e
@@ -220,36 +245,36 @@ class NewsRepository:
             top_k = settings.wires_vector_search_top_k
 
         query = f"""
-            SELECT
-                dvk.post_id,
-                dvk.keyword AS matched_keyword,
-                dvk.distance,
-                p.author,
-                p.time,
-                p.title,
-                p.url,
-                (
-                    SELECT GROUP_CONCAT(keyword, ', ')
-                    FROM keywords
-                    WHERE post_id = dvk.post_id
-                ) AS all_post_keywords
-            FROM (
-                SELECT
-                    v.rowid AS keyword_id,
-                    v.distance,
-                    k.post_id,
-                    k.keyword
-                FROM vec_keywords v
-                INNER JOIN keywords k ON v.rowid = k.id
-                WHERE v.k = ?
-                AND v.embedding MATCH (SELECT embedding FROM vec_keywords WHERE rowid = ?)
-            ) dvk
-            INNER JOIN posts p ON dvk.post_id = p.id
-            ORDER BY dvk.distance;
+        SELECT
+            k.post_id,
+            MIN(v.distance) as distance,
+            k.keyword AS matched_keyword,
+            p.author,
+            p.time,
+            p.title,
+            p.url,
+            (
+                SELECT GROUP_CONCAT(keyword, ', ')
+                FROM keywords
+                WHERE post_id = p.id
+            ) AS all_post_keywords
+        FROM vec_keywords v
+        JOIN keywords k ON v.rowid = k.id
+        JOIN posts p ON k.post_id = p.id
+        WHERE p.is_excluded = 0
+        AND v.k = ?
+        AND v.embedding MATCH (
+            SELECT embedding FROM vec_keywords WHERE rowid = ?
+        )
+        GROUP BY p.id
+        ORDER BY distance
+        LIMIT ?
         """
 
         try:
-            results = self.db.execute_query(query, (top_k, keyword_id))
+            # We request a few extra candidates (top_k + 5) from the vector index
+            # to compensate for posts that might be filtered out by 'is_excluded = 0'
+            results = self.db.execute_query(query, (top_k+5, keyword_id, top_k))
         except Exception as e:
             logger.error(f"Error executing wires vector search query: {e}")
             raise NewsRepositoryException("Error occurred while executing wires vector search") from e

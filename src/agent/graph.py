@@ -146,6 +146,8 @@ class NewsAgent:
             return self._invoke_explore_keyword_flow(messages)
         elif message.startswith("/expand"):
             return self._invoke_expand_post_flow(messages)
+        elif message.startswith("/exclude"):
+            return self._invoke_exclude_post_flow(messages)
         elif message.startswith("/"):
             messages = [*messages, SystemMessage(content="Unknown command. Use /keyword <id> [criteria] to explore related posts.")]
             return {
@@ -222,7 +224,10 @@ class NewsAgent:
             return self._command_error_response(messages, invalid_keyword)
 
         try:
-            candidates = self.keyword_search_tool_structured.run({"keyword_id": keyword_id})
+            candidates = self.keyword_search_tool_structured.run({
+                "keyword_id": keyword_id,
+                "top_k": settings.wires_vector_search_top_k
+            })
         except Exception as e:
             logger.exception("Keyword search failed in explore flow")
             return self._handle_internal_error(self._build_command_state(messages, [], None), e, "Error searching by keyword; try again later.")
@@ -297,6 +302,60 @@ class NewsAgent:
         self._preserve_keyword_ids(state)
 
         return self._format_result({**state, "skip_retrieved": True})
+
+    def _invoke_exclude_post_flow(self, messages: list[BaseMessage]):
+        """Process the special ``/exclude`` command.
+
+        Parameters
+        ----------
+        messages : list[BaseMessage]
+            List of chat messages; the last message is expected to contain
+            the ``/exclude`` command.
+
+        Returns
+        -------
+        dict
+            Normalized command output.
+        """
+        messages, err = self._ensure_messages(messages)
+        if err:
+            return err
+
+        try:
+            command, post_id = self._parse_command_with_id(messages[-1].content)
+        except Exception as e:
+            return self._command_error_response(messages, str(e))
+
+        if post_id not in self.last_retrieved_posts_ids:
+            invalid_post_id = f"Post ID {post_id} is not in the last retrieved posts. Use /exclude with a valid ID from the last response."
+            return self._command_error_response(messages, invalid_post_id)
+
+        # Paranoic check: the user might have provided an ID that was in the last response but has since been deleted.
+        if not self.repository.post_exists(post_id):
+            invalid_post = f"Post ID {post_id} does not exist."
+            return self._command_error_response(messages, invalid_post)
+
+        try:
+            self.repository.exclude_post(post_id)
+        except Exception as e:
+            logger.exception("Failed to exclude post")
+            return self._handle_internal_error(
+                self._build_command_state(messages, [], None),
+                e,
+                "An error occurred while excluding the post. Please try again later.",
+            )
+
+        exclude_message = f"Post ID {post_id} has been excluded from future searches."
+        messages.append(SystemMessage(content=exclude_message))
+        return {
+            "retrieved": [],
+            "selected_id": None,
+            "keywords": [],
+            "selected_post": None,
+            "response": exclude_message,
+            "messages": messages,
+            "skip_retrieved": True,
+        }
 
     # --- Graph Nodes ---
 
