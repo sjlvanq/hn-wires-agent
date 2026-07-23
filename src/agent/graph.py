@@ -96,8 +96,6 @@ class NewsAgent:
         self.search_tool_structured = self.search_tool.as_tool()
         self.keyword_search_tool = SearchSimilarByKeywordTool(self.repository)
         self.keyword_search_tool_structured = self.keyword_search_tool.as_tool()
-        self.last_keyword_ids: list[int] = []
-        self.last_retrieved_posts_ids: list[int] = []
 
         # Build the graph
         self.graph = self._build_graph()
@@ -202,6 +200,8 @@ class NewsAgent:
         """
         state = self._build_initial_state(messages)
         result = self.graph.invoke(state, config=config)
+        self._preserve_posts_ids(result, config)
+        self._preserve_keyword_ids(result, config)
         return self._format_result(result)
 
     def _invoke_explore_keyword_flow(self, messages: list[BaseMessage], config):
@@ -230,7 +230,10 @@ class NewsAgent:
             #logger.exception("Failed to parse /keyword command")
             return self._command_error_response(messages, str(e))
 
-        if keyword_id not in self.last_keyword_ids:
+        state_snapshot = self.graph.get_state(config)
+        last_keyword_ids = state_snapshot.values.get("last_keywords_ids", [])
+
+        if keyword_id not in last_keyword_ids:
             invalid_keyword = f"Keyword ID {keyword_id} is not in the last retrieved keywords. Use /keyword with a valid ID from the last response."
             return self._command_error_response(messages, invalid_keyword)
 
@@ -258,7 +261,7 @@ class NewsAgent:
             return self._format_result(state)
 
         state = self._build_command_state(messages, candidates, None)
-        self._preserve_posts_ids(state)
+        self._preserve_posts_ids(state, config)
 
         if selection_criteria is None:
             return self._format_explore_candidates(candidates, messages)
@@ -274,7 +277,7 @@ class NewsAgent:
         state = self._keywords_node(state)
         state = self._fetch_node(state)
         
-        self._preserve_keyword_ids(state)
+        self._preserve_keyword_ids(state, config)
 
         return self._format_result(state)
 
@@ -354,8 +357,9 @@ class NewsAgent:
         except Exception as e:
             #invalid_usage = f"Invalid usage of {command}. Usage: {command} <post_id>"
             return self._command_error_response(messages, str(e))
-
-        if post_id not in self.last_retrieved_posts_ids:
+        state_snapshot = self.graph.get_state(config)
+        last_retrieved_posts_ids = state_snapshot.values.get("last_retrieved_posts_ids", [])
+        if post_id not in last_retrieved_posts_ids:
             invalid_post_id = f"Post ID {post_id} is not in the last retrieved posts. Use /expand with a valid ID from the last response."
             return self._command_error_response(messages, invalid_post_id)
 
@@ -369,7 +373,7 @@ class NewsAgent:
         state = self._keywords_node(state)
 
         self.graph.update_state(config, {"selected_post_id": post_id})
-        self._preserve_keyword_ids(state)
+        self._preserve_keyword_ids(state, config)
 
         return self._format_result({**state, "skip_retrieved": True})
 
@@ -397,8 +401,9 @@ class NewsAgent:
             command, post_id = self._parse_command_with_id(messages[-1].content)
         except Exception as e:
             return self._command_error_response(messages, str(e))
-
-        if post_id not in self.last_retrieved_posts_ids:
+        state_snapshot = self.graph.get_state(config)
+        last_retrieved_posts_ids = state_snapshot.values.get("last_retrieved_posts_ids", [])
+        if post_id not in last_retrieved_posts_ids:
             invalid_post_id = f"Post ID {post_id} is not in the last retrieved posts. Use /exclude with a valid ID from the last response."
             return self._command_error_response(messages, invalid_post_id)
 
@@ -586,14 +591,6 @@ class NewsAgent:
                     "An error occurred while generating the response. Please try again later.",
                 )
 
-        keywords = state.get("keywords", [])
-        if keywords:
-            self.last_keyword_ids = [k["id"] for k in keywords]
-
-        candidates = state.get("candidates", [])
-        if candidates:
-            self.last_retrieved_posts_ids = [k["id"] for k in candidates]
-
         messages = [*state["messages"], SystemMessage(content=response_text)]
         return {
             **state,
@@ -645,7 +642,7 @@ class NewsAgent:
             "post_details": None,
             "response": None,
             "skip_agent_response": False,
-            "last_keywords_ids": self.last_keyword_ids,
+            "last_keywords_ids": [],
         }
 
     def _format_result(self, result) -> dict:
@@ -744,14 +741,19 @@ class NewsAgent:
             return None, self._command_error_response(messages, "No message context provided")
         return messages, None
 
-    def _preserve_keyword_ids(self, state: AgentsState):
+    def _preserve_keyword_ids(self, state: AgentsState, config: dict):
         """Preserve the last keyword IDs for future reference."""
-        self.last_keyword_ids = [k["id"] for k in state.get("keywords", [])]
+        keywords = state.get("keywords", [])
+        if keywords:
+            last_keyword_ids = [k["id"] for k in keywords]
+            self.graph.update_state(config, {"last_keywords_ids": last_keyword_ids})
 
-    def _preserve_posts_ids(self, state: AgentsState):
+    def _preserve_posts_ids(self, state: AgentsState, config: dict):
         """Preserve the last post IDs for future reference."""
-        if state.get("candidates"):
-            self.last_retrieved_posts_ids = [post["id"] for post in state["candidates"]]
+        candidates = state.get("candidates", [])
+        if candidates:
+            last_retrieved_posts_ids = [post["id"] for post in candidates]
+            self.graph.update_state(config, {"last_retrieved_posts_ids": last_retrieved_posts_ids})
 
     def _generate_writer_response(self, query: str, post: dict) -> str:
         """Generate a response using the writer agent."""
