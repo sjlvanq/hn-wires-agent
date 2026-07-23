@@ -630,7 +630,7 @@ class NewsAgent:
 
     def _build_command_state(self, messages: list[BaseMessage], candidates: list[dict], selected_post_id: int | None) -> AgentsState:
         """
-        Build the state for the /keyword command.
+        Build the state for commands.
 
         Args:
             messages: The current message history.
