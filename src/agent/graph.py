@@ -32,6 +32,7 @@ class AgentsState(TypedDict):
     skip_agent_response: bool
     last_keywords_ids: list[int] = []
     last_retrieved_posts_ids: list[int] = []
+    last_user_query: str | None
 
 
 class NewsAgent:
@@ -153,6 +154,8 @@ class NewsAgent:
             return self._invoke_explore_keyword_flow(messages, config)
         elif message.startswith("/expand"):
             return self._invoke_expand_post_flow(messages, config)
+        elif message.startswith("/write"):
+            return self._invoke_write_flow(messages, config)
         elif message.startswith("/exclude"):
             return self._invoke_exclude_post_flow(messages, config)
         elif message.startswith("/"):
@@ -272,6 +275,56 @@ class NewsAgent:
         self._preserve_keyword_ids(state)
 
         return self._format_result(state)
+
+    def _invoke_write_flow(self, messages: list[BaseMessage], config):
+        """Process the special ``/write`` command.
+
+        Parameters
+        ----------
+        messages : list[BaseMessage]
+            List of chat messages; the last message is expected to contain
+            the ``/write`` command.
+        config : dict
+            Configuration for the write flow.
+
+        Returns
+        -------
+        dict
+            Normalized command output.
+        """
+        messages, err = self._ensure_messages(messages)
+        if err:
+            return err
+
+        state_snapshot = self.graph.get_state(config)
+        selected_id = state_snapshot.values.get("selected_post_id")
+
+        if not selected_id:
+            invalid_post = "No post has been selected yet. Use /expand <post_id> to select a post first."
+            return self._command_error_response(messages, invalid_post)
+
+        # Sanity check: selected post might have been deleted.
+        if not self.repository.post_exists(selected_id):
+            invalid_post = f"Post ID {selected_id} no longer exists."
+            return self._command_error_response(messages, invalid_post)
+
+        state = self._build_command_state(messages, [], selected_id)
+        state = self._fetch_node(state)
+
+        query = state.get("last_user_query") or messages[-1].content
+        try:
+            response_text = self._generate_writer_response(query, state["post_details"])
+        except Exception as e:
+            return self._handle_internal_error(state, e,
+                "An error occurred while generating the response. Please try again later.",
+            )
+
+        return self._format_result({
+            **state,
+            "response": response_text,
+            "post_details": None,
+            "skip_retrieved": True
+        })
 
     def _invoke_expand_post_flow(self, messages: list[BaseMessage]):
         """Process the special ``/expand`` command.
@@ -510,6 +563,7 @@ class NewsAgent:
             return {**state, "response": "", "messages": messages, "skip_agent_response": True}
 
         user_query = messages[-1].content
+        state["last_user_query"]= user_query
 
         if not state["post_details"]:
             response_text = (
