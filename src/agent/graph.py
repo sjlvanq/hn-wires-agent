@@ -204,7 +204,7 @@ class NewsAgent:
         result = self.graph.invoke(state, config=config)
         return self._format_result(result)
 
-    def _invoke_explore_keyword_flow(self, messages: list[BaseMessage]):
+    def _invoke_explore_keyword_flow(self, messages: list[BaseMessage], config):
         """Process the special ``/keyword`` command.
 
         Parameters
@@ -212,6 +212,8 @@ class NewsAgent:
         messages : list[BaseMessage]
             List of chat messages; the last message is expected to contain
             the ``/keyword`` command.
+        config : dict
+            Configuration containing the `thread_id` for state persistence.
 
         Returns
         -------
@@ -326,7 +328,7 @@ class NewsAgent:
             "skip_retrieved": True
         })
 
-    def _invoke_expand_post_flow(self, messages: list[BaseMessage]):
+    def _invoke_expand_post_flow(self, messages: list[BaseMessage], config):
         """Process the special ``/expand`` command.
 
         Parameters
@@ -334,6 +336,8 @@ class NewsAgent:
         messages : list[BaseMessage]
             List of chat messages; the last message is expected to contain
             the ``/expand`` command.
+        config : dict
+            Configuration containing the `thread_id` for state persistence.
 
         Returns
         -------
@@ -367,7 +371,7 @@ class NewsAgent:
 
         return self._format_result({**state, "skip_retrieved": True})
 
-    def _invoke_exclude_post_flow(self, messages: list[BaseMessage]):
+    def _invoke_exclude_post_flow(self, messages: list[BaseMessage], config):
         """Process the special ``/exclude`` command.
 
         Parameters
@@ -375,6 +379,8 @@ class NewsAgent:
         messages : list[BaseMessage]
             List of chat messages; the last message is expected to contain
             the ``/exclude`` command.
+        config : dict
+            Configuration containing the `thread_id` for state persistence.
 
         Returns
         -------
