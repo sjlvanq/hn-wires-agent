@@ -71,6 +71,7 @@ def main():
                     ]
                     console.print(Panel("\n".join(candidate_lines), title="Retrieved candidates", border_style="yellow"))
                     console.print(f"[dim][yellow]Use [u]/expand <post_id>[/u] for post details[/yellow][dim]", justify="right")
+                    console.print(f"[dim][yellow]Use [u]/exclude <post_id>[/u] for excluding posts from future retrieval[/yellow][dim]", justify="right")
                     if result['selected_id']:
                         console.print(f"Selected post ID: {result['selected_id']}", style="bold green")
                 else:
