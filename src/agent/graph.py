@@ -135,6 +135,8 @@ class NewsAgent:
             The user query.
         chat_history : list | None, optional
             Past conversation history to provide context to the model.
+        thread_id : str, optional
+            The identifier for the conversation thread to maintain state. Defaults to "default".
 
         Returns
         -------
@@ -187,6 +189,8 @@ class NewsAgent:
         messages : list
             List of :class:`BaseMessage` objects representing the chat
             history.
+        config : dict
+            Configuration containing the `thread_id` for state persistence.
 
         Returns
         -------
