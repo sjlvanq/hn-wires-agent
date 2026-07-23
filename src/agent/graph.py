@@ -506,13 +506,10 @@ class NewsAgent:
                 "Try asking a different question or use a more specific topic."
             )
         else:
-            post = state["post_details"]
             try:
-                response_text = self.writer.write(user_query, post)
+                response_text = self._generate_writer_response(user_query, state["post_details"])
             except Exception as e:
-                return self._handle_internal_error(
-                    state,
-                    e,
+                return self._handle_internal_error(state, e,
                     "An error occurred while generating the response. Please try again later.",
                 )
 
@@ -683,6 +680,12 @@ class NewsAgent:
         if state.get("candidates"):
             self.last_retrieved_posts_ids = [post["id"] for post in state["candidates"]]
 
+    def _generate_writer_response(self, query: str, post: dict) -> str:
+        """Generate a response using the writer agent."""
+        try:
+            return self.writer.write(query, post)
+        except Exception as e:
+            raise e
 
     def _command_error_response(self, messages, response_text):
         messages = [*messages, SystemMessage(content=response_text)]
