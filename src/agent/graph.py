@@ -300,6 +300,7 @@ class NewsAgent:
 
         state_snapshot = self.graph.get_state(config)
         selected_id = state_snapshot.values.get("selected_post_id")
+        last_query = state_snapshot.values.get("last_user_query")
 
         if not selected_id:
             invalid_post = "No post has been selected yet. Use /expand <post_id> to select a post first."
@@ -313,7 +314,7 @@ class NewsAgent:
         state = self._build_command_state(messages, [], selected_id)
         state = self._fetch_node(state)
 
-        query = state.get("last_user_query") or messages[-1].content
+        query = last_query or messages[-1].content
         try:
             response_text = self._generate_writer_response(query, state["post_details"])
         except Exception as e:
@@ -367,6 +368,7 @@ class NewsAgent:
         state = self._fetch_node(state)
         state = self._keywords_node(state)
 
+        self.graph.update_state(config, {"selected_post_id": post_id})
         self._preserve_keyword_ids(state)
 
         return self._format_result({**state, "skip_retrieved": True})
