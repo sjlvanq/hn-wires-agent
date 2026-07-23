@@ -4,6 +4,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.graph import END, StateGraph, add_messages
 from langgraph.prebuilt import ToolNode
+from langgraph.checkpoint.memory import MemorySaver
 
 import logging
 
@@ -119,11 +120,13 @@ class NewsAgent:
         workflow.add_edge("fetch", "respond")
         workflow.add_edge("respond", END)
 
-        return workflow.compile()
+        memory = MemorySaver()
+
+        return workflow.compile(checkpointer=memory)
 
     # --- Public Interface ---
 
-    def invoke(self, message: str, chat_history: list | None = None) -> dict:
+    def invoke(self, message: str, chat_history: list | None = None, thread_id: str = "default") -> dict:
         """Synchronously invoke the conversational agent.
 
         Parameters
@@ -142,12 +145,14 @@ class NewsAgent:
         messages = list(chat_history) if chat_history else []
         messages.append(HumanMessage(content=message))
 
+        config = {"configurable": {"thread_id": thread_id}}
+
         if message.startswith("/keyword"):
-            return self._invoke_explore_keyword_flow(messages)
+            return self._invoke_explore_keyword_flow(messages, config)
         elif message.startswith("/expand"):
-            return self._invoke_expand_post_flow(messages)
+            return self._invoke_expand_post_flow(messages, config)
         elif message.startswith("/exclude"):
-            return self._invoke_exclude_post_flow(messages)
+            return self._invoke_exclude_post_flow(messages, config)
         elif message.startswith("/"):
             messages = [*messages, SystemMessage(content="Unknown command. Use /keyword <id> [criteria] to explore related posts.")]
             return {
@@ -160,19 +165,21 @@ class NewsAgent:
                 "skip_retrieved": True,
             }
 
-        return self._invoke_default_flow(messages)
+        return self._invoke_default_flow(messages, config)
 
-    async def ainvoke(self, message: str, chat_history: list | None = None) -> dict:
+    async def ainvoke(self, message: str, chat_history: list | None = None,  thread_id: str = "default") -> dict:
         messages = list(chat_history) if chat_history else []
         messages.append(HumanMessage(content=message))
 
+        config = {"configurable": {"thread_id": thread_id}}
+
         state = self._build_initial_state(messages)
-        result = await self.graph.ainvoke(state)
+        result = await self.graph.ainvoke(state, config=config)
         return self._format_result(result)
 
     # --- Execution Flows ---
 
-    def _invoke_default_flow(self, messages):
+    def _invoke_default_flow(self, messages, config):
         """Driver for the standard conversational flow.
 
         Parameters
@@ -187,7 +194,7 @@ class NewsAgent:
             Formatted result dictionary.
         """
         state = self._build_initial_state(messages)
-        result = self.graph.invoke(state)
+        result = self.graph.invoke(state, config=config)
         return self._format_result(result)
 
     def _invoke_explore_keyword_flow(self, messages: list[BaseMessage]):
