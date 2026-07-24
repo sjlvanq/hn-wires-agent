@@ -154,6 +154,8 @@ class NewsAgent:
             return self._invoke_expand_post_flow(messages, config)
         elif message.startswith("/write"):
             return self._invoke_write_flow(messages, config)
+        elif message.startswith("/similar"):
+            return self._invoke_similar_flow(messages, config)
         elif message.startswith("/exclude"):
             return self._invoke_exclude_post_flow(messages, config)
         elif message.startswith("/"):
@@ -331,6 +333,73 @@ class NewsAgent:
             "post_details": None,
             "skip_retrieved": True
         })
+
+    def _invoke_similar_flow(self, messages: list[BaseMessage], config):
+        """Process the special ``/similar`` command.
+
+        Searches for posts with embeddings similar to the selected post's wire.
+
+        Parameters
+        ----------
+        messages : list[BaseMessage]
+            List of chat messages; the last message is expected to contain
+            the ``/similar`` command.
+        config : dict
+            Configuration containing the `thread_id` for state persistence.
+
+        Returns
+        -------
+        dict
+            Normalized command output with similar posts.
+        """
+        messages, err = self._ensure_messages(messages)
+        if err:
+            return err
+
+        state_snapshot = self.graph.get_state(config)
+        selected_id = state_snapshot.values.get("selected_post_id")
+
+        if not selected_id:
+            invalid_post = "No post has been selected yet. Use /expand <post_id> to select a post first."
+            return self._command_error_response(messages, invalid_post)
+
+        # Sanity check: selected post might have been deleted.
+        if not self.repository.post_exists(selected_id):
+            invalid_post = f"Post ID {selected_id} no longer exists."
+            return self._command_error_response(messages, invalid_post)
+
+        # Check that the selected post has a wire
+        # TODO: ...with embedding
+        # post_with_wire = self.repository.get_post_with_wire(selected_id)
+        # if not post_with_wire or not post_with_wire.get("wire"):
+        #     invalid_post = f"Post ID {selected_id} has no wire/summary for similarity search."
+        #     return self._command_error_response(messages, invalid_post)
+
+        # Search for posts similar to the selected post using its stored embedding
+        try:
+            candidates = self.repository.wires_vector_search_by_post_id(
+                selected_id,
+                settings.wires_vector_search_top_k
+            )
+        except Exception as e:
+            logger.exception("Failed to search for similar posts")
+            return self._handle_internal_error(
+                self._build_command_state(messages, [], None),
+                e,
+                "Error searching for similar posts; try again later."
+            )
+
+        if not candidates:
+            return self._handle_internal_error(
+                self._build_command_state(messages, [], None),
+                ValueError(f"No similar posts found for post {selected_id}"),
+                f"No posts similar to ID {selected_id} were found."
+            )
+
+        state = self._build_command_state(messages, candidates, None)
+        self._preserve_posts_ids(state, config)
+        return self._format_explore_candidates(candidates, messages)
+
 
     def _invoke_expand_post_flow(self, messages: list[BaseMessage], config):
         """Process the special ``/expand`` command.

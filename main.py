@@ -95,7 +95,8 @@ def main():
                     )
                     console.print(f"Keywords: [magenta]{keywords}[/magenta]", justify="right")
                     console.print(f"[dim][magenta]Use [u]/keyword <keyword_id> <optional-selection-criteria>[/u] for relational lookup[/magenta][dim]", justify="right")
-                    console.print(f"[dim][cyan]Use [u]/write[/u] for generating a response[/cyan][dim]", justify="right")
+                    console.print(f"[dim][magenta]Use [u]/similar[/u] for finding similar posts[/magenta][dim]", justify="right")
+                    console.print(f"[dim][magenta]Use [u]/write[/u] for generating a response[/magenta][dim]", justify="right")
 
             console.print()
             if result["response"]:

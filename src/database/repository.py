@@ -223,6 +223,59 @@ class NewsRepository:
 
         return posts
 
+    def wires_vector_search_by_post_id(self, post_id: int, top_k: Optional[int] = None) -> list[dict]:
+        """Search for posts similar to a given post by its ID.
+
+        Uses the wire embedding already stored in the database for the referenced post.
+
+        Parameters
+        ----------
+        post_id: int
+            Identifier of the post whose wire embedding is used as query.
+        top_k: int | None
+            Maximum number of results to return; ``None`` falls back to
+            :pyattr:`settings.wires_vector_search_top_k`.
+
+        Returns
+        -------
+        list[dict]
+            Posts similar to the given post, ranked by embedding distance.
+        """
+        if top_k is None:
+            top_k = settings.wires_vector_search_top_k
+
+        query = f"""
+            SELECT
+                p.id, p.title, p.author, p.text, p.url,
+                p.descendants, p.score, p.time,
+                w.summary, v.distance
+            FROM posts p
+            INNER JOIN wires w ON p.id = w.post_id
+            INNER JOIN vec_wires v ON w.id = v.rowid
+            WHERE w.summary != ''
+                AND p.is_excluded = 0
+                AND p.id != ?
+                AND v.k = ?
+                AND v.embedding MATCH (
+                    SELECT embedding FROM vec_wires v2
+                    INNER JOIN wires w2 ON v2.rowid = w2.id
+                    WHERE w2.post_id = ?
+                )
+            ORDER BY v.distance
+            LIMIT ?
+        """
+
+        try:
+            results = self.db.execute_query(query, (post_id, top_k+5, post_id, top_k))
+        except Exception as e:
+            logger.error(f"Error executing wires vector search by post ID: {e}")
+            raise NewsRepositoryException("Error occurred while searching for similar posts by post ID") from e
+
+        if not results:
+            return []
+
+        return self._add_similarity_scores(results)
+
     def keywords_vector_search(self, keyword_id: int, top_k: Optional[int] = None) -> list[dict]:
         """Search posts that are close to the vector of ``keyword_id``.
 
