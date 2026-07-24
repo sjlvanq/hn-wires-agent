@@ -158,6 +158,9 @@ class NewsAgent:
             return self._invoke_similar_flow(messages, config)
         elif message.startswith("/exclude"):
             return self._invoke_exclude_post_flow(messages, config)
+        elif message.startswith("/session"):
+            return self._invoke_session_info(messages, config)
+
         elif message.startswith("/"):
             messages = [*messages, SystemMessage(content="Unknown command. Use /keyword <id> [criteria] to explore related posts.")]
             return {
@@ -499,6 +502,79 @@ class NewsAgent:
             "keywords": [],
             "selected_post": None,
             "response": exclude_message,
+            "messages": messages,
+            "skip_retrieved": True,
+        }
+
+    def _invoke_session_info(self, messages: list[BaseMessage], config):
+        """Process the special ``/session`` command.
+
+        Returns current session state information to the user.
+
+        Parameters
+        ----------
+        messages : list[BaseMessage]
+            List of chat messages.
+        config : dict
+            Configuration containing the `thread_id` for state persistence.
+
+        Returns
+        -------
+        dict
+            Session information response.
+        """
+        state_snapshot = self.graph.get_state(config)
+        values = state_snapshot.values if state_snapshot else {}
+
+        last_keywords_ids = values.get("last_keywords_ids", [])
+        last_retrieved_posts_ids = values.get("last_retrieved_posts_ids", [])
+        selected_post_id = values.get("selected_post_id")
+        last_user_query = values.get("last_user_query")
+
+        # Build session info message
+        session_info_lines = [
+            "Session State",
+            "-------------",
+            ""
+        ]
+
+        # Thread info
+        thread_id = config.get("configurable", {}).get("thread_id", "default")
+        session_info_lines.append(f"**Thread ID:** {thread_id}")
+
+        # Current selected post
+        if selected_post_id:
+            session_info_lines.append(f"**Current Selected Post ID:** {selected_post_id}")
+        else:
+            session_info_lines.append("**Current Selected Post ID:** None")
+
+        # Last user query
+        if last_user_query:
+            session_info_lines.append(f"**Last User Query:** {last_user_query}")
+
+        session_info_lines.append("")
+
+        # Available keyword IDs for /keyword command
+        if last_keywords_ids:
+            session_info_lines.append(f"**Available Keyword IDs for /keyword:** {last_keywords_ids}")
+        else:
+            session_info_lines.append("**Available Keyword IDs for /keyword:** None (run a search first)")
+
+        # Available post IDs for /expand and /similar commands
+        if last_retrieved_posts_ids:
+            session_info_lines.append(f"**Available Post IDs for /expand:** {last_retrieved_posts_ids}")
+        else:
+            session_info_lines.append("**Available Post IDs for /expand:** None (run a search first)")
+
+        session_info = "\n".join(session_info_lines)
+
+        messages = [*messages, SystemMessage(content=session_info)]
+        return {
+            "retrieved": [],
+            "selected_id": None,
+            "keywords": [],
+            "selected_post": None,
+            "response": session_info,
             "messages": messages,
             "skip_retrieved": True,
         }

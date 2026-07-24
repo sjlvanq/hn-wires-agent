@@ -72,8 +72,6 @@ def main():
                     console.print(Panel("\n".join(candidate_lines), title="Retrieved candidates", border_style="yellow"))
                     console.print(f"[dim][yellow]Use [u]/expand <post_id>[/u] for post details[/yellow][dim]", justify="right")
                     console.print(f"[dim][yellow]Use [u]/exclude <post_id>[/u] for excluding posts from future retrieval[/yellow][dim]", justify="right")
-                    if result['selected_id']:
-                        console.print(f"Selected post ID: {result['selected_id']}", style="bold green")
                 else:
                     console.print(Panel("No candidates found.", title="Retrieved candidates", border_style="yellow"))
 
@@ -103,6 +101,7 @@ def main():
                 console.print(Panel(result["response"], title="Agent Response", border_style="cyan"))
                 console.print()
 
+            console.print(f"[dim][green]Use [u]/session[/u] for session information[/dim][/green]", style="green")
         except KeyboardInterrupt:
             console.print("\nInterrupted by user.", style="yellow")
             print_goodbye()
