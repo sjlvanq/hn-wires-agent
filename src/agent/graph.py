@@ -34,6 +34,9 @@ class AgentsState(TypedDict):
     last_retrieved_posts_ids: list[int] = []
     last_user_query: str | None
 
+class NoMessagesProvidedError(Exception):
+    """Raised when no messages are provided."""
+    pass
 
 class NewsAgent:
     """NewsAgent
@@ -225,14 +228,15 @@ class NewsAgent:
         dict
             Normalized command output.
         """
-        messages, err = self._ensure_messages(messages)
-        if err:
-            return err
+        try:
+            messages = self._ensure_messages(messages)
+        except NoMessagesProvidedError as e:
+            return self._command_error_response(messages, str(e))
 
         try:
             command, keyword_id, selection_criteria = self._parse_command_with_id_and_criteria(messages[-1].content)
         except Exception as e:
-            #logger.exception("Failed to parse /keyword command")
+            logger.exception("Failed to parse /keyword command")
             return self._command_error_response(messages, str(e))
 
         state_snapshot = self.graph.get_state(config)
@@ -302,9 +306,10 @@ class NewsAgent:
         dict
             Normalized command output.
         """
-        messages, err = self._ensure_messages(messages)
-        if err:
-            return err
+        try:
+            messages = self._ensure_messages(messages)
+        except NoMessagesProvidedError as e:
+            return self._command_error_response(messages, str(e))
 
         state_snapshot = self.graph.get_state(config)
         selected_id = state_snapshot.values.get("selected_post_id")
@@ -355,9 +360,10 @@ class NewsAgent:
         dict
             Normalized command output with similar posts.
         """
-        messages, err = self._ensure_messages(messages)
-        if err:
-            return err
+        try:
+            messages = self._ensure_messages(messages)
+        except NoMessagesProvidedError as e:
+            return self._command_error_response(messages, str(e))
 
         state_snapshot = self.graph.get_state(config)
         selected_id = state_snapshot.values.get("selected_post_id")
@@ -420,9 +426,10 @@ class NewsAgent:
         dict
             Normalized command output.
         """
-        messages, err = self._ensure_messages(messages)
-        if err:
-            return err
+        try:
+            messages = self._ensure_messages(messages)
+        except NoMessagesProvidedError as e:
+            return self._command_error_response(messages, str(e))
 
         try:
             command, post_id = self._parse_command_with_id(messages[-1].content)
@@ -465,9 +472,10 @@ class NewsAgent:
         dict
             Normalized command output.
         """
-        messages, err = self._ensure_messages(messages)
-        if err:
-            return err
+        try:
+            messages = self._ensure_messages(messages)
+        except NoMessagesProvidedError as e:
+            return self._command_error_response(messages, str(e))
 
         try:
             command, post_id = self._parse_command_with_id(messages[-1].content)
@@ -883,8 +891,8 @@ class NewsAgent:
 
     def _ensure_messages(self, messages):
         if not messages:
-            return None, self._command_error_response(messages, "No message context provided")
-        return messages, None
+            raise NoMessagesProvidedError("No message context provided")
+        return messages
 
     def _preserve_keyword_ids(self, state: AgentsState, config: dict):
         """Preserve the last keyword IDs for future reference."""
