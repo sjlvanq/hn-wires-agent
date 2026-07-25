@@ -38,6 +38,18 @@ class NoMessagesProvidedError(Exception):
     """Raised when no messages are provided."""
     pass
 
+class PostNotSelectedError(Exception):
+    """Raised when no post is selected for an operation that requires one."""
+    pass
+
+class PostNotFoundError(Exception):
+    """Raised when a post is not found in the repository."""
+    pass
+
+class CommandArgumentError(Exception):
+    """Raised when a required command argument is missing or invalid."""
+    pass
+
 class NewsAgent:
     """NewsAgent
     ---------
@@ -161,9 +173,10 @@ class NewsAgent:
             return self._invoke_similar_flow(messages, config)
         elif message.startswith("/exclude"):
             return self._invoke_exclude_post_flow(messages, config)
+        elif message.startswith("/bookmark"):
+            return self._invoke_bookmark_flow(messages, config)
         elif message.startswith("/session"):
             return self._invoke_session_info(messages, config)
-
         elif message.startswith("/"):
             messages = [*messages, SystemMessage(content="Unknown command. Use /keyword <id> [criteria] to explore related posts.")]
             return {
@@ -513,6 +526,129 @@ class NewsAgent:
             "messages": messages,
             "skip_retrieved": True,
         }
+
+    def _invoke_bookmark_flow(self, messages: list[BaseMessage], config):
+        """Process the special ``/bookmark`` command.
+
+        Parameters
+        ----------
+        messages : list[BaseMessage]
+            List of chat messages; the last message is expected to contain
+            the ``/bookmark`` command.
+        config : dict
+            Configuration containing the `thread_id` for state persistence.
+
+        Returns
+        -------
+        dict
+            Normalized command output.
+        """
+        try:
+            messages = self._ensure_messages(messages)
+        except NoMessagesProvidedError as e:
+            return self._command_error_response(messages, str(e))
+
+        subcommands = ["add", "list", "del"]
+        try:
+            command, subcommand, subcommand_args = self._parse_command_with_subcommand(messages[-1].content, subcommands)
+        except Exception as e:
+            return self._command_error_response(messages, str(e))
+
+        thread_id = config.get("configurable", {}).get("thread_id")
+
+        if subcommand == "add":
+            state_snapshot = self.graph.get_state(config)
+            post_id = state_snapshot.values.get("selected_post_id")
+            try:
+                post_id = self._ensure_post(post_id, messages)
+            except (PostNotSelectedError, PostNotFoundError) as e:
+                return self._command_error_response(messages, str(e))
+
+            try:
+                bookmark_id = self._add_bookmark(post_id, subcommand_args, thread_id)
+            except Exception as e:
+                #logger.exception("Failed to create bookmark")
+                return self._handle_internal_error(
+                    self._build_command_state(messages, [], None),
+                    e,
+                    "An error occurred while creating the bookmark. Please try again later.",
+                )
+
+            note_text = f' with note: "{subcommand_args}"' if subcommand_args else ""
+            bookmark_message = f"Post ID {post_id} has been bookmarked (ID: {bookmark_id}){note_text}."
+            messages.append(SystemMessage(content=bookmark_message))
+
+            return {
+                "retrieved": [],
+                "selected_id": None,
+                "keywords": [],
+                "selected_post": None,
+                "response": bookmark_message,
+                "messages": messages,
+                "skip_retrieved": True,
+            }
+        elif subcommand == "del":
+            try:
+                self._ensure_command_args(subcommand_args, "Bookmark ID is required for deletion. Use /bookmark del <bookmark_id>")
+                bookmark_id = int(subcommand_args)
+                deleted = self._delete_bookmark(bookmark_id)
+            except CommandArgumentError as e:
+                return self._command_error_response(messages, str(e))
+            except ValueError:
+                return self._command_error_response(messages, "Invalid bookmark ID format. Use /bookmark del <bookmark_id>")
+            except Exception as e:
+                logger.exception("Failed to delete bookmark")
+                return self._handle_internal_error(
+                    self._build_command_state(messages, [], None),
+                    e,
+                    "An error occurred while deleting the bookmark.",
+                )
+
+            if deleted:
+                response = f"Bookmark ID {bookmark_id} has been deleted."
+            else:
+                response = f"Bookmark ID {bookmark_id} not found."
+
+            messages.append(SystemMessage(content=response))
+            return {
+                "retrieved": [],
+                "selected_id": None,
+                "keywords": [],
+                "selected_post": None,
+                "response": response,
+                "messages": messages,
+                "skip_retrieved": True,
+            }
+        elif subcommand == "list":
+            try:
+                bookmarks = self._get_bookmarks(thread_id)
+            except Exception as e:
+                logger.exception("Failed to list bookmarks")
+                return self._handle_internal_error(
+                    self._build_command_state(messages, [], None),
+                    e,
+                    "An error occurred while fetching bookmarks.",
+                )
+
+            if not bookmarks:
+                response = "No bookmarks found."
+            else:
+                lines = [
+                    f"ID: {b['id']} | Post: {b['title']} | Note: {b['note'] or 'N/A'}"
+                    for b in bookmarks
+                ]
+                response = "Your bookmarks:\n" + "\n".join(lines)
+
+            messages.append(SystemMessage(content=response))
+            return {
+                "retrieved": [],
+                "selected_id": None,
+                "keywords": [],
+                "selected_post": None,
+                "response": response,
+                "messages": messages,
+                "skip_retrieved": True,
+            }
 
     def _invoke_session_info(self, messages: list[BaseMessage], config):
         """Process the special ``/session`` command.
@@ -889,10 +1025,61 @@ class NewsAgent:
         except ValueError:
             raise ValueError(f"Invalid ID format. Use {command} <id> <optional-criteria>")
 
+    def _parse_command_with_subcommand(self, message: str, allowed_subcommands: list[str]) -> tuple[str, str, str]:
+        """Parse a command with subcommand
+
+        Parameters
+        ----------
+        message : str
+            Raw user message containing the command.
+
+        Returns
+        -------
+        tuple[str, str, str | None]
+            The command, the subcommand and optional args
+        """
+        try:
+            parts = message.strip().split(maxsplit=2)
+            command = parts[0]
+            subcommand = parts[1]
+            if subcommand not in allowed_subcommands:
+                raise ValueError(f"Invalid subcommand '{subcommand}'. Allowed subcommands: {allowed_subcommands}")
+            args = parts[2] if len(parts) > 2 else None
+            return command, subcommand, args
+        except IndexError:
+            subcommands = "<" + "|".join(allowed_subcommands) + ">"
+            raise ValueError(f"Invalid command format. Use {command} {subcommands} <args>")
+
     def _ensure_messages(self, messages):
         if not messages:
             raise NoMessagesProvidedError("No message context provided")
         return messages
+
+    def _ensure_post(self, post_id, messages):
+        if not post_id:
+            invalid_post = "No post has been selected yet. Please perform a search or use /expand <post_id> to select a post first."
+            raise PostNotSelectedError(invalid_post)
+        if not self.repository.post_exists(post_id):
+            invalid_post = f"Selected post ID {post_id} was lost. Use /expand <post_id> to select a valid post first."
+            raise PostNotFoundError(invalid_post)
+        return post_id
+
+    def _ensure_command_args(self, args, error_msg):
+        if not args:
+            raise CommandArgumentError(error_msg)
+        return args
+
+    def _add_bookmark(self, post_id: int, note: str | None, thread_id: str | None) -> int:
+        """Add a bookmark. Returns the bookmark ID."""
+        return self.repository.add_bookmark(post_id, note, thread_id)
+
+    def _get_bookmarks(self, thread_id: str | None) -> list[dict]:
+        """Get all bookmarks for a thread."""
+        return self.repository.get_bookmarks(thread_id)
+
+    def _delete_bookmark(self, bookmark_id: int) -> bool:
+        """Delete a bookmark. Returns True if deleted."""
+        return self.repository.remove_bookmark(bookmark_id)
 
     def _preserve_keyword_ids(self, state: AgentsState, config: dict):
         """Preserve the last keyword IDs for future reference."""

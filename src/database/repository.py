@@ -157,6 +157,98 @@ class NewsRepository:
             logger.error(f"Error occurred while excluding post ID {post_id}: {e}")
             raise NewsRepositoryException("Error occurred while excluding post") from e
 
+    #-- Bookmarks --
+
+    def add_bookmark(self, post_id: int, note: str | None = None, thread_id: str | None = None) -> int:
+        """Save a post as bookmark with an optional note.
+
+        Parameters
+        ----------
+        post_id: int
+            Identifier of the post to bookmark.
+        note: str | None
+            Optional note to attach to the bookmark.
+        thread_id: str | None
+            Thread identifier for session scoping.
+
+        Returns
+        -------
+        int
+            The ID of the newly created bookmark.
+        """
+        query = """
+            INSERT INTO bookmarks (post_id, note, thread_id)
+            VALUES (?, ?, ?)
+        """
+        try:
+            return self.db.execute_update(query, (post_id, note, thread_id))
+        except Exception as e:
+            logger.error(f"Error occurred while creating bookmark for post ID {post_id}: {e}")
+            raise NewsRepositoryException("Error occurred while creating bookmark") from e
+
+    def get_bookmarks(self, thread_id: str | None = None) -> list[dict]:
+        """Retrieve bookmarks, optionally filtered by thread.
+
+        Parameters
+        ----------
+        thread_id: str | None
+            If provided, only return bookmarks for this thread.
+
+        Returns
+        -------
+        list[dict]
+            List of bookmarks with post details.
+        """
+        if thread_id:
+            query = """
+                SELECT b.id, b.post_id, b.note, b.created_at, b.thread_id,
+                    p.title, p.url, p.author
+                FROM bookmarks b
+                JOIN posts p ON b.post_id = p.id
+                WHERE b.thread_id = ?
+                ORDER BY b.created_at DESC
+            """
+            params = (thread_id,)
+        else:
+            query = """
+                SELECT b.id, b.post_id, b.note, b.created_at, b.thread_id,
+                    p.title, p.url, p.author
+                FROM bookmarks b
+                JOIN posts p ON b.post_id = p.id
+                ORDER BY b.created_at DESC
+            """
+            params = ()
+
+        try:
+            results = self.db.execute_query(query, params)
+        except Exception as e:
+            logger.error(f"Error occurred while fetching bookmarks: {e}")
+            raise NewsRepositoryException("Error occurred while fetching bookmarks") from e
+
+        return [dict(row) for row in results]
+
+    def remove_bookmark(self, bookmark_id: int) -> bool:
+        """Delete a bookmark by its ID.
+
+        Parameters
+        ----------
+        bookmark_id: int
+            Identifier of the bookmark to delete.
+
+        Returns
+        -------
+        bool
+            True if a row was deleted, False otherwise.
+        """
+        query = "DELETE FROM bookmarks WHERE id = ?"
+        try:
+            rows_affected = self.db.execute_update(query, (bookmark_id,))
+            return rows_affected > 0
+        except Exception as e:
+            logger.error(f"Error occurred while deleting bookmark ID {bookmark_id}: {e}")
+            raise NewsRepositoryException("Error occurred while deleting bookmark") from e
+
+
     # 3. Advanced Vector Searches (Public)
 
     def wires_vector_search(self, embedding: list[float], top_k: Optional[int] = None) -> list[dict]:
