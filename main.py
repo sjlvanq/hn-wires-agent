@@ -12,7 +12,7 @@ from rich.logging import RichHandler
 import logging
 import traceback
 
-LOGGER_LEVEL = "WARNING" #DEBUG
+LOGGER_LEVEL = "DEBUG" #"WARNING" #DEBUG
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))

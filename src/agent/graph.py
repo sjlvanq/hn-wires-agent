@@ -12,6 +12,7 @@ from config.settings import settings
 from database import NewsRepository
 from embeddings import OllamaEmbeddings
 from models import OllamaLLM
+from .bridge_scorer import BridgeScorerAgent
 from .selector import SelectorAgent
 from .writer import WriterAgent
 from tools import (
@@ -33,6 +34,7 @@ class AgentsState(TypedDict):
     last_keywords_ids: list[int] = []
     last_retrieved_posts_ids: list[int] = []
     last_user_query: str | None
+    evaluation: dict | None = None
 
 class NoMessagesProvidedError(Exception):
     """Raised when no messages are provided."""
@@ -60,6 +62,7 @@ class NewsAgent:
     def __init__(
         self,
         llm: OllamaLLM | None = None,
+        scorer_llm: OllamaLLM | None = None,
         selector_llm: OllamaLLM | None = None,
         writer_llm: OllamaLLM | None = None,
         repository: NewsRepository | None = None,
@@ -71,6 +74,8 @@ class NewsAgent:
         ----------
         llm : OllamaLLM, optional
             Primary language model used for the main conversational flow.
+        scorer_llm : OllamaLLM, optional
+            Language model for the bridge scorer sub‑agent.
         selector_llm : OllamaLLM, optional
             Language model for the selector sub‑agent.
         writer_llm : OllamaLLM, optional
@@ -83,6 +88,12 @@ class NewsAgent:
             :class:`OllamaEmbeddings` instance.
         """
         self.llm = llm or OllamaLLM()
+        self.scorer = BridgeScorerAgent(
+            scorer_llm
+            or OllamaLLM(
+                model=settings.bridge_scorer_llm_model
+            )
+        )
         self.selector = SelectorAgent(
             selector_llm
             or OllamaLLM(
@@ -122,13 +133,15 @@ class NewsAgent:
         workflow = StateGraph(AgentsState)
 
         workflow.add_node("retrieve", self._retrieve_node)
+        workflow.add_node("score", self._score_node)
         workflow.add_node("select", self._select_node)
         workflow.add_node("keywords", self._keywords_node)
         workflow.add_node("fetch", self._fetch_node)
         workflow.add_node("respond", self._respond_node)
 
         workflow.set_entry_point("retrieve")
-        workflow.add_edge("retrieve", "select")
+        workflow.add_edge("retrieve", "score")
+        workflow.add_edge("score", "select")
         workflow.add_edge("select", "keywords")
         workflow.add_edge("keywords", "fetch")
         workflow.add_edge("fetch", "respond")
@@ -288,12 +301,29 @@ class NewsAgent:
         if selection_criteria is None:
             return self._format_explore_candidates(candidates, messages)
 
-        try:
-            selected_post_id = self.selector.select(selection_criteria, candidates)
-        except Exception as e:
-            err_state = self._build_command_state(messages, candidates, None)
-            err_state = self._handle_internal_error(err_state, e, "An error occurred while selecting the post. Try again later.")
-            return self._format_result(err_state)
+        # Score candidates using BridgeScorerAgent
+        evaluation = self._score_candidates(selection_criteria, candidates)
+        selected_post_id = None
+
+        if evaluation and "evaluation" in evaluation:
+            logger.info("Selected post using BridgeScorerAgent scores in /keyword flow.")
+            scores = {e["post_id"]: e["emotional_connection_score"] +
+                            e["conceptual_connection_score"] +
+                            e["metaphorical_connection_score"]
+                    for e in evaluation["evaluation"]}
+            if scores:
+                best_id = max(scores, key=scores.get)
+                selected_post_id = int(best_id)
+        
+        # Fallback to SelectorAgent if BridgeScorerAgent didn't work
+        if selected_post_id is None:
+            logger.info("BridgeScorerAgent evaluation failed or empty; using SelectorAgent fallback in /keyword flow.")
+            try:
+                selected_post_id = self.selector.select(selection_criteria, candidates)
+            except Exception as e:
+                err_state = self._build_command_state(messages, candidates, None)
+                err_state = self._handle_internal_error(err_state, e, "An error occurred while selecting the post. Try again later.")
+                return self._format_result(err_state)
 
         state = self._build_command_state(messages, candidates, selected_post_id)
         state = self._keywords_node(state)
@@ -358,7 +388,8 @@ class NewsAgent:
     def _invoke_similar_flow(self, messages: list[BaseMessage], config):
         """Process the special ``/similar`` command.
 
-        Searches for posts with embeddings similar to the selected post's wire.
+        Searches for posts with embeddings similar to the selected post's wire,
+        then scores them using BridgeScorerAgent.
 
         Parameters
         ----------
@@ -380,6 +411,7 @@ class NewsAgent:
 
         state_snapshot = self.graph.get_state(config)
         selected_id = state_snapshot.values.get("selected_post_id")
+        last_query = state_snapshot.values.get("last_user_query")
 
         if not selected_id:
             invalid_post = "No post has been selected yet. Use /expand <post_id> to select a post first."
@@ -418,7 +450,14 @@ class NewsAgent:
                 f"No posts similar to ID {selected_id} were found."
             )
 
+        # Score candidates using the original user query for better context
+        query = last_query or messages[-1].content
+        evaluation = self._score_candidates(query, candidates)
+
         state = self._build_command_state(messages, candidates, None)
+        if evaluation:
+            state["evaluation"] = evaluation
+        
         self._preserve_posts_ids(state, config)
         return self._format_explore_candidates(candidates, messages)
 
@@ -757,9 +796,80 @@ class NewsAgent:
             **state,
             "candidates": candidates,
         }
+    
+    def _score_node(self, state: AgentsState) -> AgentsState:
+        """Evaluate the *candidates* with BridgeScorerAgent and store the
+        JSON result under the key ``evaluation``.
+
+        The structure matches the following schema:
+        {
+          "evaluation": [
+            {
+              "post_id": "string",
+              "emotional_connection_score": 0.0‑1.0,
+              "conceptual_connection_score": 0.0‑1.0,
+              "metaphorical_connection_score": 0.0‑1.0
+            },
+            …
+          ]
+        }
+        """
+        messages = state.get("messages") or []
+        if not messages:
+            logger.error("No messages in state for scorer node; cannot evaluate posts.")
+            return {**state, "selected_post_id": None, "skip_agent_response": True}
+
+        if not state.get("candidates"):
+            # No candidates; keep state untouched but set flag
+            logger.error("No candidates in state for scorer node; cannot evaluate posts.")
+            return {**state, "skip_agent_response": True}
+
+        raw_result = self.scorer.evaluate(
+            state["messages"][-1].content,
+            state["candidates"]
+        )
+
+        # If something fails, an empty object is saved to prevent type errors.
+        if raw_result is None:
+            # TODO: improve logger message
+            logger.error("Something fails, an empty object is saved to prevent type errors")
+            raw_result = {"evaluation": []}
+
+        return {**state, "evaluation": raw_result}
+
+    def _score_candidates(self, query: str, candidates: list[dict]) -> dict | None:
+        """Score candidates using BridgeScorerAgent.
+
+        This is a helper method that can be called from any flow to consistently
+        score candidate posts.
+
+        Parameters
+        ----------
+        query : str
+            The user query.
+        candidates : list[dict]
+            List of candidate posts to score.
+
+        Returns
+        -------
+        dict | None
+            The evaluation result with scores, or None if scoring failed.
+        """
+        if not candidates:
+            return None
+
+        try:
+            result = self.scorer.evaluate(query, candidates)
+            return result if result else None
+        except Exception as e:
+            logger.warning(f"BridgeScorerAgent failed; will use fallback selector. Error: {e}")
+            return None
 
     def _select_node(self, state: AgentsState) -> AgentsState:
         """Select the single most relevant post ID from the retrieved candidates.
+
+        Uses BridgeScorerAgent evaluation if available, otherwise falls back to
+        SelectorAgent.
 
         Parameters
         ----------
@@ -771,22 +881,46 @@ class NewsAgent:
         AgentsState
             Updated state containing ``selected_post_id``.
         """
-        messages = state.get("messages") or []
-        if not messages:
-            logger.error("No messages in state for select node; cannot select post.")
+        if not state.get("candidates"):
+            logger.error("No candidates in state for select node; cannot select.")
             return {**state, "selected_post_id": None, "skip_agent_response": True}
-        try:
-            selected_post_id = self.selector.select(messages[-1].content, state.get("candidates", []))
-        except Exception as e:
-            return self._handle_internal_error(
-                {**state, "selected_post_id": None},
-                e,
-                "An error occurred while selecting the post. Please try again later.",
-            )
-        return {
-            **state,
-            "selected_post_id": selected_post_id,
-        }
+
+        selected_post_id = None
+
+        # Use BridgeScorerAgent scores if available (from _score_node)
+        if "evaluation" in state and state["evaluation"]:
+            logger.info("Selecting post based on BridgeScorerAgent evaluation scores.")
+            try:
+                scores = {e["post_id"]: e["emotional_connection_score"] +
+                            e["conceptual_connection_score"] +
+                            e["metaphorical_connection_score"]
+                        for e in state["evaluation"].get("evaluation", [])}
+                
+                if scores:
+                    best_id = max(scores, key=scores.get)
+                    selected_post_id = int(best_id)
+            except (KeyError, ValueError, TypeError) as e:
+                logger.warning(f"Failed to extract scores from evaluation: {e}. Using fallback.")
+                selected_post_id = None
+
+        # Fallback to SelectorAgent if scoring didn't work
+        if selected_post_id is None:
+            logger.info("Using SelectorAgent fallback to select post.")
+            messages = state.get("messages") or []
+            if not messages:
+                logger.error("No messages in state for select node; cannot select post.")
+                return {**state, "selected_post_id": None, "skip_agent_response": True}
+            
+            try:
+                selected_post_id = self.selector.select(messages[-1].content, state.get("candidates", []))
+            except Exception as e:
+                return self._handle_internal_error(
+                    {**state, "selected_post_id": None},
+                    e,
+                    "An error occurred while selecting the post. Please try again later.",
+                )
+
+        return {**state, "selected_post_id": selected_post_id}
 
     def _keywords_node(self, state: AgentsState) -> AgentsState:
         """Extract keywords from the selected post.
@@ -867,6 +1001,28 @@ class NewsAgent:
         user_query = messages[-1].content
         state["last_user_query"]= user_query
 
+        # if not state["post_details"]:
+        #     response_text = (
+        #         "No relevant Hacker News post could be selected for that request. "
+        #         "Try asking a different question or use a more specific topic."
+        #     )
+        # else:
+        #     # Puedes incorporar un resumen de los scores en la respuesta
+        #     scores = next(
+        #         (e for e in state["evaluation"]["evaluation"]
+        #         if e["post_id"] == str(state["selected_post_id"])),
+        #         None
+        #     )
+        #     if scores:
+        #         summary = (
+        #             f"Emotional: {scores['emotional_connection_score']:.2f} | "
+        #             f"Conceptual: {scores['conceptual_connection_score']:.2f} | "
+        #             f"Metaphorical: {scores['metaphorical_connection_score']:.2f}"
+        #         )
+        #         response_text = f"{self.writer.write(state['messages'][-1].content, state['post_details'])}\n\nConnection scores: {summary}"
+        #     else:
+        #         response_text = self.writer.write(state['messages'][-1].content, state['post_details'])
+
         if not state["post_details"]:
             response_text = (
                 "No relevant Hacker News post could be selected for that request. "
@@ -912,6 +1068,7 @@ class NewsAgent:
             "response": None,
             "skip_agent_response": False,
             "last_keywords_ids": [],
+            "evaluation": None,
         }
 
     def _build_command_state(self, messages: list[BaseMessage], candidates: list[dict], selected_post_id: int | None) -> AgentsState:
@@ -932,6 +1089,7 @@ class NewsAgent:
             "response": None,
             "skip_agent_response": False,
             "last_keywords_ids": [],
+            "evaluation": None,
         }
 
     def _format_result(self, result) -> dict:

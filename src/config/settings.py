@@ -57,6 +57,12 @@ class Settings(BaseSettings):
         description="Enable reasoning capabilities in the agent"
     )
 
+    # Bridge Scorer Agent Configuration
+    bridge_scorer_llm_model: str = Field(
+        default="nemotron-3-nano:30b-cloud",
+        description="Ollama model used by the Bridge Scorer Agent"
+    )
+
     # Selector Agent Configuration
     selector_llm_model: str = Field(
         default="alibayram/hunyuan:0.5b",
@@ -103,7 +109,7 @@ class Settings(BaseSettings):
 
     # Vector Search Configuration
     wires_vector_search_top_k: int = Field(
-        default=10,
+        default=5,
         description="Number of top results to return from vector search"
     )
     wires_vector_search_threshold: float = Field(
