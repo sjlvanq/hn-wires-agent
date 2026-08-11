@@ -105,7 +105,6 @@ class BridgeScorerAgent:
 
         # In _build_prompt method
         schema_json = json.dumps(EVALUATION_SCHEMA, indent=2)
-        f"Return a JSON object matching this structure:\n{schema_json}\nÇ"
 
         return (
             "You are a post scoring assistant.\n"
