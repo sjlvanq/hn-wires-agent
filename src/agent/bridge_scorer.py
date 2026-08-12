@@ -95,10 +95,11 @@ class BridgeScorerAgent:
         """
         candidate_lines = []
         for candidate in candidates:
+            post_id = candidate.get("id")
             title = candidate.get("title") or ""
             summary = candidate.get("summary") or ""
             candidate_lines.append(
-                f"- post_id: {candidate.get('id')}\n"
+                f"- post_id: {post_id}\n"
                 f"  title: {title}\n"
                 f"  summary: {summary}\n"
             )
