@@ -54,6 +54,7 @@ class BridgeScorerAgent:
             scores, or ``None`` if no candidates were supplied.
         """
         if not candidates:
+            logger.warning("No candidates provided for evaluation.")
             return None
 
         if isinstance(user_query, str):
