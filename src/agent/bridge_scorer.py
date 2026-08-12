@@ -57,6 +57,8 @@ class BridgeScorerAgent:
             logger.warning("No candidates provided for evaluation.")
             return None
 
+        self._validate_candidates(candidates)
+
         if isinstance(user_query, str):
             user_query_text = user_query
         elif isinstance(user_query, dict):
@@ -179,3 +181,23 @@ class BridgeScorerAgent:
             no candidates were supplied.
         """
         return [self.evaluate(query, candidates) for query in user_queries]
+
+    def _validate_candidates(self, candidates: list[dict[str, Any]]) -> None:
+        """Validate candidate structure.
+
+        Parameters
+        ----------
+        candidates : list[dict[str, Any]]
+            Candidate posts to validate.
+
+        Raises
+        ------
+        ValueError
+            If candidates are missing required fields ('id', 'title', 'summary').
+        """
+        for i, candidate in enumerate(candidates):
+            if "id" not in candidate:
+                raise ValueError(f"Candidate at index {i} missing required field 'id'")
+            if not any(key in candidate for key in ["title", "summary"]):
+                raise ValueError(f"Candidate at index {i} missing 'title' or 'summary'")
+
