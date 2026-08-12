@@ -106,8 +106,7 @@ class BridgeScorerAgent:
 
         candidate_text = "\n".join(candidate_lines)
 
-        # In _build_prompt method
-        schema_json = json.dumps(EVALUATION_SCHEMA, indent=2)
+        schema_json = json.dumps(self.EVALUATION_SCHEMA, indent=2)
 
         return (
             "You are a post scoring assistant.\n"
