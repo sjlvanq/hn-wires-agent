@@ -136,7 +136,8 @@ class BridgeScorerAgent:
             parsed = json.loads(text)
             # Expect a top‑level dict with an ``evaluation`` key.
             if isinstance(parsed, dict) and "evaluation" in parsed:
-                return parsed
+                if self._validate_scores(parsed):
+                    return parsed
         except json.JSONDecodeError:
             pass
 
@@ -201,3 +202,27 @@ class BridgeScorerAgent:
             if not any(key in candidate for key in ["title", "summary"]):
                 raise ValueError(f"Candidate at index {i} missing 'title' or 'summary'")
 
+    def _validate_scores(self, evaluation: dict) -> bool:
+        """Validate that scores are within expected ranges.
+
+        Parameters
+        ----------
+        evaluation : dict
+            Parsed evaluation result.
+
+        Returns
+        -------
+        bool
+            True if all scores are valid, False otherwise.
+        """
+        if "evaluation" not in evaluation:
+            return False
+
+        for item in evaluation["evaluation"]:
+            for score_key in ["emotional_connection_score",
+                            "conceptual_connection_score",
+                            "metaphorical_connection_score"]:
+                score = item.get(score_key, 0)
+                if not isinstance(score, (int, float)) or not (0.0 <= score <= 1.0):
+                    return False
+        return True
