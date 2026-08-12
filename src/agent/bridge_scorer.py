@@ -181,7 +181,7 @@ class BridgeScorerAgent:
             List of evaluation dictionaries (one per query) or ``None`` if
             no candidates were supplied.
         """
-        return [self.evaluate(query, candidates) for query in user_queries]
+        return [self.evaluate(user_query, candidates) for user_query in user_queries]
 
     def _validate_candidates(self, candidates: list[dict[str, Any]]) -> None:
         """Validate candidate structure.
