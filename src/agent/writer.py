@@ -21,7 +21,7 @@ class WriterAgent:
         """
         self.llm = llm or OllamaLLM()
 
-    def write(self, user_query: str, selected_post: dict[str, Any]) -> int | None:
+    def write(self, user_query: str, selected_post: dict[str, Any]) -> str | None:
         """Generate a final response based on the user query and the selected post.
 
         Parameters
