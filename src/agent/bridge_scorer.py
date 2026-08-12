@@ -115,7 +115,7 @@ class BridgeScorerAgent:
         )
 
     def _parse_evaluation(self, text: str) -> dict | None:
-        """Parse the LLM response to obtain a post ID.
+        """Parse the LLM response to extract evaluation scores.
 
         Parameters
         ----------
