@@ -12,6 +12,17 @@ logger = logging.getLogger(__name__)
 class BridgeScorerAgent:
     """Agent responsible for scoring candidate posts against a user query and returning a JSON evaluation."""
 
+    EVALUATION_SCHEMA = {
+        "evaluation": [
+            {
+                "post_id": "string",
+                "emotional_connection_score": "float",
+                "conceptual_connection_score": "float",
+                "metaphorical_connection_score": "float"
+            }
+        ]
+    }
+
     def __init__(self, llm: OllamaLLM | None = None):
         """Create a :class:`BridgeScorerAgent`.
 
@@ -22,18 +33,6 @@ class BridgeScorerAgent:
             :class:`OllamaLLM` is instantiated.
         """
         self.llm = llm or OllamaLLM()
-
-        EVALUATION_SCHEMA = {
-            "evaluation": [
-                {
-                    "post_id": "string",
-                    "emotional_connection_score": "float",
-                    "conceptual_connection_score": "float", 
-                    "metaphorical_connection_score": "float"
-                }
-            ]
-        }
-
 
     def evaluate(self, user_query: str | dict, candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
         """Evaluate candidate posts against the user query.
