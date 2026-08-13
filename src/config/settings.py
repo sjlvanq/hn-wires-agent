@@ -31,6 +31,12 @@ class Settings(BaseSettings):
         description="Path to SQLite database"
     )
 
+    # BridgeScorer Configuration
+    bridge_scorer_log_path: str = Field(
+        default="bridge_scorer.log.jsonl",
+        description="Path to log file for BridgeScorer evaluations"
+    )
+
     # Agent Configuration
     orchestrator_llm_model: str = Field(
         default="functiongemma:270m",

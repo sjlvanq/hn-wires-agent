@@ -4,6 +4,7 @@ from typing import Any, Iterable
 import datetime
 import os
 import logging
+from config.settings import settings
 
 from models import OllamaLLM
 
@@ -158,7 +159,8 @@ class BridgeScorerAgent:
         implementation for easy reference when training a dedicated
         model.
         """
-        log_path = os.path.join(os.path.dirname(__file__), "bridge_scorer.log.jsonl")
+        #log_path = os.path.join(os.path.dirname(__file__), "bridge_scorer.log.jsonl")
+        log_path = settings.bridge_scorer_log_path
         try:
             with open(log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
