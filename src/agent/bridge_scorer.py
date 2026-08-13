@@ -4,9 +4,9 @@ from typing import Any, Iterable
 import datetime
 import os
 import logging
-from config.settings import settings
 
 from models import OllamaLLM
+from .utils import persist_llm_interaction
 
 logger = logging.getLogger(__name__)
 
@@ -75,15 +75,19 @@ class BridgeScorerAgent:
         response = self.llm.invoke(prompt)
 
         logger.debug(f"BridgeScorerAgent response:\n{response}")
-        # Persist request/response pair
-        log_entry = {
-            "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-            "user_query": user_query_text,
-            "candidates": candidates,
-            "prompt": prompt,
-            "response": response,
-        }
-        self._persist_log(log_entry)
+
+        # persist the LLM interaction for later inspection/training
+        try:
+            persist_llm_interaction(
+                agent_name="BridgeScorerAgent",
+                llm_model=self.llm.model,
+                user_query=user_query_text,
+                prompt=prompt,
+                response=response
+            )
+        except Exception:
+            # swallow any persistence errors to avoid affecting main flow
+            logger.exception("Failed to persist bridge scorer interaction")
 
         return self._parse_evaluation(response)
 
@@ -151,21 +155,6 @@ class BridgeScorerAgent:
                 pass
 
         return None
-
-    def _persist_log(self, entry: dict) -> None:
-        """Append a log entry to ``bridge_scorer.log.jsonl``.
-
-        The log file is created in the same directory as the agent
-        implementation for easy reference when training a dedicated
-        model.
-        """
-        #log_path = os.path.join(os.path.dirname(__file__), "bridge_scorer.log.jsonl")
-        log_path = settings.bridge_scorer_log_path
-        try:
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        except OSError as exc:
-            logger.warning("Failed to write bridge scorer log: %s", exc)
 
     def select_batch(self, user_queries: Iterable[str | dict], candidates: list[dict[str, Any]]) -> list[dict | None]:
         """Score each query against the same candidate list.

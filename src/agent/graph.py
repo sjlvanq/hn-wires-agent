@@ -91,7 +91,9 @@ class NewsAgent:
         self.scorer = BridgeScorerAgent(
             scorer_llm
             or OllamaLLM(
-                model=settings.bridge_scorer_llm_model
+                model=settings.bridge_scorer_llm_model,
+                max_tokens=settings.bridge_scorer_max_tokens,
+                num_ctx=settings.bridge_scorer_num_ctx
             )
         )
         self.selector = SelectorAgent(

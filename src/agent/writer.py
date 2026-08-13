@@ -4,6 +4,7 @@ from typing import Any, Iterable
 import logging
 
 from models import OllamaLLM
+from .utils import persist_llm_interaction
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,19 @@ class WriterAgent:
         response = self.llm.invoke(prompt)
 
         logger.debug(f"WriterAgent response:\n{response}")
+
+        # persist the LLM interaction for later inspection/training
+        try:
+            persist_llm_interaction(
+                agent_name="WriterAgent",
+                llm_model=self.llm.model,
+                user_query=user_query,
+                prompt=prompt,
+                response=response
+            )
+        except Exception:
+            # swallow any persistence errors to avoid affecting main flow
+            logger.exception("Failed to persist writer interaction")
 
         return response
 

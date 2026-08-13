@@ -4,3 +4,4 @@
 .pytest_cache
 __pycache__
 **/bridge_scorer.log.jsonl
+**/writer_agent.log.jsonl
