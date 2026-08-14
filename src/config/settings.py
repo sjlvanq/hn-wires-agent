@@ -57,28 +57,6 @@ class Settings(BaseSettings):
         description="Enable reasoning capabilities in the agent"
     )
 
-    # Bridge Scorer Agent Configuration
-
-    bridge_scorer_log_path: str = Field(
-        default="bridge_scorer.log.jsonl",
-        description="Path to log file for BridgeScorer evaluations"
-    )
-
-    bridge_scorer_llm_model: str = Field(
-        default="nemotron-3-nano:30b-cloud",
-        description="Ollama model used by the Bridge Scorer Agent"
-    )
-
-    bridge_scorer_num_ctx: int = Field(
-        default=2048,
-        description="Number of context tokens for the agent"
-    )
-
-    bridge_scorer_max_tokens: int = Field(
-        default=2048,
-        description="Max tokens for selector LLM generation"
-    )
-
     # Selector Agent Configuration
     selector_llm_model: str = Field(
         default="alibayram/hunyuan:0.5b",
@@ -99,6 +77,28 @@ class Settings(BaseSettings):
     selector_reasoning: bool | None = Field(
         default=None,
         description="Enable reasoning capabilities for selector LLM"
+    )
+
+    # Bridge Scorer Agent Configuration
+
+    bridge_scorer_log_path: str = Field(
+        default="bridge_scorer.log.jsonl",
+        description="Path to log file for BridgeScorer evaluations"
+    )
+
+    bridge_scorer_llm_model: str = Field(
+        default="nemotron-3-nano:30b-cloud",
+        description="Ollama model used by the Bridge Scorer Agent"
+    )
+
+    bridge_scorer_num_ctx: int = Field(
+        default=2048,
+        description="Number of context tokens for the agent"
+    )
+
+    bridge_scorer_max_tokens: int = Field(
+        default=512,
+        description="Max tokens for bridge scorer LLM generation"
     )
 
     # Writer Agent Configuration
