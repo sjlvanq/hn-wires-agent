@@ -390,8 +390,7 @@ class NewsAgent:
     def _invoke_similar_flow(self, messages: list[BaseMessage], config):
         """Process the special ``/similar`` command.
 
-        Searches for posts with embeddings similar to the selected post's wire,
-        then scores them using BridgeScorerAgent.
+        Searches for posts with embeddings similar to the selected post's wire.
 
         Parameters
         ----------
@@ -453,12 +452,12 @@ class NewsAgent:
             )
 
         # Score candidates using the original user query for better context
-        query = last_query or messages[-1].content
-        evaluation = self._score_candidates(query, candidates)
+        # query = last_query or messages[-1].content
+        # evaluation = self._score_candidates(query, candidates)
 
         state = self._build_command_state(messages, candidates, None)
-        if evaluation:
-            state["evaluation"] = evaluation
+        # if evaluation:
+        #     state["evaluation"] = evaluation
         
         self._preserve_posts_ids(state, config)
         return self._format_explore_candidates(candidates, messages)
