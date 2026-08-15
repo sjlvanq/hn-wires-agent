@@ -99,6 +99,9 @@ def main():
 
             console.print()
             if result["response"]:
+                if result["sketch_response"]:
+                    console.print(Panel(result["sketch_response"], title="Sketcher Agent Response", border_style="cyan"))
+                    console.print()
                 console.print(Panel(result["response"], title="Agent Response", border_style="cyan"))
                 console.print()
 

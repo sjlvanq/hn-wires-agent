@@ -89,6 +89,11 @@ class BridgeScorerAgent:
             # swallow any persistence errors to avoid affecting main flow
             logger.exception("Failed to persist bridge scorer interaction")
 
+        # Handle empty or invalid responses
+        if not response or not response.strip():
+            logger.warning("BridgeScorerAgent returned empty response")
+            return None
+
         return self._parse_evaluation(response)
 
     def _build_prompt(self, user_query: str, candidates: list[dict[str, Any]]) -> str:

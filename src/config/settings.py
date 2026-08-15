@@ -101,6 +101,28 @@ class Settings(BaseSettings):
         description="Max tokens for bridge scorer LLM generation"
     )
 
+    # Relation Sketcher Agent Configuration
+
+    relation_sketcher_log_path: str = Field(
+        default="relation_sketcher.log.jsonl",
+        description="Path to log file for Relation Sketcher Agent interactions"
+    )
+
+    relation_sketcher_llm_model: str = Field(
+        default="nemotron-3-nano:30b-cloud",
+        description="Ollama model used by the Relation Sketcher Agent"
+    )
+
+    relation_sketcher_num_ctx: int = Field(
+        default=2048,
+        description="Number of context tokens for the agent"
+    )
+
+    relation_sketcher_max_tokens: int = Field(
+        default=1024,
+        description="Max tokens for sketcher LLM generation"
+    )
+
     # Writer Agent Configuration
 
     writer_log_path: str = Field(

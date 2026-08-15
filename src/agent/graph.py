@@ -14,6 +14,7 @@ from embeddings import OllamaEmbeddings
 from models import OllamaLLM
 from .bridge_scorer import BridgeScorerAgent
 from .selector import SelectorAgent
+from .sketcher import RelationSketcherAgent
 from .writer import WriterAgent
 from tools import (
     SearchSimilarByEmbeddingTool,
@@ -35,6 +36,7 @@ class AgentsState(TypedDict):
     last_retrieved_posts_ids: list[int] = []
     last_user_query: str | None
     evaluation: dict | None = None
+    sketch_response: str | None = None
 
 class NoMessagesProvidedError(Exception):
     """Raised when no messages are provided."""
@@ -64,6 +66,7 @@ class NewsAgent:
         llm: OllamaLLM | None = None,
         scorer_llm: OllamaLLM | None = None,
         selector_llm: OllamaLLM | None = None,
+        sketcher_llm: OllamaLLM | None = None,
         writer_llm: OllamaLLM | None = None,
         repository: NewsRepository | None = None,
         embeddings: OllamaEmbeddings | None = None,
@@ -78,6 +81,8 @@ class NewsAgent:
             Language model for the bridge scorer sub‑agent.
         selector_llm : OllamaLLM, optional
             Language model for the selector sub‑agent.
+        sketcher_llm : OllamaLLM, optional
+            Language model for the sketcher sub‑agent.
         writer_llm : OllamaLLM, optional
             Language model for the writer sub‑agent.
         repository : NewsRepository, optional
@@ -104,6 +109,14 @@ class NewsAgent:
                 max_tokens=settings.selector_max_tokens,
                 num_ctx=settings.selector_num_ctx,
                 reasoning=settings.selector_reasoning
+            )
+        )
+        self.sketcher = RelationSketcherAgent(
+            sketcher_llm
+            or OllamaLLM(
+                model=settings.relation_sketcher_llm_model,
+                max_tokens=settings.relation_sketcher_max_tokens,
+                num_ctx=settings.relation_sketcher_num_ctx
             )
         )
         self.writer = WriterAgent(
@@ -139,6 +152,7 @@ class NewsAgent:
         workflow.add_node("select", self._select_node)
         workflow.add_node("keywords", self._keywords_node)
         workflow.add_node("fetch", self._fetch_node)
+        workflow.add_node("sketch", self._sketch_node)
         workflow.add_node("respond", self._respond_node)
 
         workflow.set_entry_point("retrieve")
@@ -146,7 +160,8 @@ class NewsAgent:
         workflow.add_edge("score", "select")
         workflow.add_edge("select", "keywords")
         workflow.add_edge("keywords", "fetch")
-        workflow.add_edge("fetch", "respond")
+        workflow.add_edge("fetch", "sketch")
+        workflow.add_edge("sketch", "respond")
         workflow.add_edge("respond", END)
 
         memory = MemorySaver()
@@ -973,6 +988,57 @@ class NewsAgent:
             "post_details": post_details,
         }
 
+    def _sketch_node(self, state: AgentsState) -> AgentsState:
+        """Build the conceptual bridge between the user query and the selected post.
+
+        Parameters
+        ----------
+        state : AgentsState
+            Current graph state.
+
+        Returns
+        -------
+        AgentsState
+            Updated state with the generated sketch as the final ``response``.
+        """
+        if state.get("skip_agent_response"):
+            return {
+                **state,
+                "response": "",
+                "messages": state["messages"],
+            }
+
+        messages = state.get("messages") or []
+        if not messages:
+            logger.error("No messages in state for sketch node; nothing to sketch.")
+            return {**state, "response": "", "messages": messages, "skip_agent_response": True}
+
+        user_query = messages[-1].content
+        state["last_user_query"] = user_query
+
+        if not state["post_details"]:
+            response_text = (
+                "No relevant Hacker News post could be selected for that request. "
+                "Try asking a different question or use a more specific topic."
+            )
+        else:
+            try:
+                response_text = self.sketcher.sketch(user_query, state["post_details"])
+            except Exception as e:
+                logger.warning(f"SketcherAgent raised exception: {e}, using fallback")
+                response_text = "[Direct Connection]"
+
+        # SystemMessage requires a string, ensure we always have one
+        sketch_message = response_text if response_text else "[Direct Connection]"
+        messages = [*state["messages"], SystemMessage(content=sketch_message)]
+        return {
+            **state,
+            "post_details": state["post_details"],
+            "sketch_response": sketch_message,
+            #"response": response_text,
+            "messages": messages,
+        }
+
     def _respond_node(self, state: AgentsState) -> AgentsState:
         """Build the final response based on the selected post.
 
@@ -999,8 +1065,13 @@ class NewsAgent:
             logger.error("No messages in state for respond node; nothing to respond to.")
             return {**state, "response": "", "messages": messages, "skip_agent_response": True}
 
-        user_query = messages[-1].content
-        state["last_user_query"]= user_query
+        # Prefer the last HumanMessage in the conversation as the user's query.
+        human_msg = next((m for m in reversed(messages) if isinstance(m, HumanMessage)), None)
+        if human_msg:
+            user_query = human_msg.content
+        else:
+            # Fallback to previously recorded last_user_query or the last message content.
+            user_query = state.get("last_user_query") or (messages[-1].content if messages else "")
 
         # if not state["post_details"]:
         #     response_text = (
@@ -1031,7 +1102,7 @@ class NewsAgent:
             )
         else:
             try:
-                response_text = self._generate_writer_response(user_query, state["post_details"])
+                response_text = self._generate_writer_response(user_query, state["post_details"], state["sketch_response"])
             except Exception as e:
                 return self._handle_internal_error(state, e,
                     "An error occurred while generating the response. Please try again later.",
@@ -1116,6 +1187,7 @@ class NewsAgent:
             "response": result["response"],
             "messages": result["messages"],
             "skip_retrieved": result.get("skip_retrieved", False),
+            "sketch_response": result.get("sketch_response"),
         }
 
     def _format_explore_candidates(self, candidates: list, messages: list[BaseMessage]) -> dict:
@@ -1254,10 +1326,10 @@ class NewsAgent:
             last_retrieved_posts_ids = [post["id"] for post in candidates]
             self.graph.update_state(config, {"last_retrieved_posts_ids": last_retrieved_posts_ids})
 
-    def _generate_writer_response(self, query: str, post: dict) -> str:
+    def _generate_writer_response(self, query: str, post: dict, conceptual_bridge: str | None = None) -> str:
         """Generate a response using the writer agent."""
         try:
-            return self.writer.write(query, post)
+            return self.writer.write(query, post, conceptual_bridge)
         except Exception as e:
             raise e
 

@@ -33,6 +33,8 @@ def persist_llm_interaction(
             # reuse existing settings key used by bridge scorer as a sensible default
             if "BRIDGE" in agent_name.upper():
                 log_path = settings.bridge_scorer_log_path or "bridge_scorer.log.jsonl"
+            elif "SKETCHER" in agent_name.upper():
+                log_path = settings.relation_sketcher_log_path or "sketcher_agent.log.jsonl"
             elif "WRITER" in agent_name.upper():
                 log_path = settings.writer_log_path or "writer_agent.log.jsonl"
             else:
