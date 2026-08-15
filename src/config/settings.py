@@ -92,12 +92,12 @@ class Settings(BaseSettings):
     )
 
     bridge_scorer_num_ctx: int = Field(
-        default=2048,
+        default=4096,
         description="Number of context tokens for the agent"
     )
 
     bridge_scorer_max_tokens: int = Field(
-        default=512,
+        default=2048,
         description="Max tokens for bridge scorer LLM generation"
     )
 
